@@ -1,0 +1,19 @@
+"""Paper digest: find new papers, rank them, summarize them, post them to each subscriber's chats.
+
+    config.py      load config.yaml + subscribers/*.yaml
+    paper.py       one paper record: IDs, link, merging duplicates
+    sources/       PubMed, Europe PMC, OpenAlex, Semantic Scholar, arXiv (+ search_all)
+    openalex.py    author h-index and journal citedness (+ author-ID lookup CLI)
+    relevance.py   Kimi scores each candidate's fit to the subscriber's interest (0-10, batched)
+    ranking.py     score, filter and sort papers
+    query.py       one boolean query (or a topic Kimi turns into one) -> each source's syntax
+    llm.py         Kimi client with rate-limit retries and JSON replies
+    summarizer.py  summaries, overview and Chinese translations with Kimi (batched)
+    notify/        build and send the digest to Slack / WeCom / email
+    env.py         read secrets from .env or GitHub
+    store.py       what each subscriber has already received (seen/), run lock
+    history.py     every ranked candidate with its score (history/), for trend summaries
+"""
+from dotenv import load_dotenv
+
+load_dotenv()      # before any module reads API keys from the environment

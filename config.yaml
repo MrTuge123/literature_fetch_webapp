@@ -1,0 +1,59 @@
+# ---- Shared defaults for every subscriber ----
+# Each subscriber has its own file in subscribers/ (query, filters, where to post).
+# Anything set there overrides the value here; ranking: is merged key by key.
+
+provider: groq            # "groq" (GROQ_API_KEY) or "kimi" (MOONSHOT_API_KEY); see digest/llm.py
+model: "openai/gpt-oss-120b"   # Groq: openai/gpt-oss-120b, openai/gpt-oss-20b, llama-3.3-70b-versatile
+                         # Kimi: kimi-k2.6
+pubmed_sort: relevance    # "relevance" (PubMed Best Match) or "pub_date"
+days_back: 30             # n: papers from the last n days (added to PubMed / published / submitted)
+candidate_pool: 50        # k: papers pulled from each source before ranking (per-source override:
+                          #    sources.<name>.candidate_pool)
+
+# ---- Where to search ----
+# Each subscriber switches sources on. Their query: (boolean) or topic: (plain English, Kimi
+# writes the query) is translated into each source's syntax at run time; a source's own
+# query: overrides that. The same paper found in several sources is posted once.
+sources:
+  pubmed:           {enabled: true}
+  europepmc:        {enabled: false}
+  openalex:         {enabled: false}
+  semantic_scholar: {enabled: false}
+  arxiv:            {enabled: false}
+max_papers: 5             # s: papers posted per subscriber
+overview_min_relevance: 5 # the overview describes all candidates with at least this relevance (0-10)
+
+# ---- Ranking by author / journal impact (data from OpenAlex) ----
+ranking:
+  # Final score = weighted mix of relevance, author score and journal score (0-1),
+  # plus keyword_credit for each matched keyword (key_words are set per subscriber)
+  relevance_weight: 1.0        # 0 = off (no Kimi relevance calls)
+  author_weight: 0.6
+  journal_weight: 0.4
+
+  # Relevance: Kimi reads every candidate's title + abstract and scores 0-10 how well it fits the
+  # subscriber's interest: (default: its topic:/query: plus key_words), relevance_batch papers per call.
+  # A paper Kimi couldn't score is ranked on author + journal alone. Scores are saved in history/
+  # and reused in later runs while the interest, model and relevance_thinking stay the same.
+  relevance_batch: 25
+  relevance_thinking: false    # true = Kimi reasons before scoring: ~25x slower, scores vary more
+
+  # Caps: at or above these values a paper gets the full score for that part
+  author_h_cap: 60             # h-index of the paper's top co-first/corresponding author
+  journal_citedness_cap: 10    # journal's 2-year mean citations (~ impact factor)
+
+  # Hard filters (0 = off). Preferred authors/journals always pass.
+  min_relevance: 0             # min Kimi relevance (0-10); e.g. 4 drops papers that are off topic
+  min_score: 0.0               # min weighted score to pass filter (0-1)
+  min_author_h_index: 0        # min h-index of the paper's top co-first/corresponding author
+  min_journal_citedness: 0     # min journal's 2-year mean citations (~ impact factor)
+
+  # New papers are sometimes not in OpenAlex yet
+  keep_unmatched: true
+  unmatched_score: 0.3
+
+  # Preprints have no journal: they get this journal score instead, and skip min_journal_citedness
+  preprint_journal_score: 0.3
+  keep_preprints: true         # false = never post preprints
+
+  keyword_credit: 0.1          # added per matched keyword

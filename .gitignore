@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+.DS_Store
+node_modules/
+dist/
+cdk.out/
+seen/
+history/
+subscribers/*.yaml
+!subscribers/_template.yaml
+.digest.lock
+*.tmp

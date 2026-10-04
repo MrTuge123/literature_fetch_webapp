@@ -1,0 +1,52 @@
+# Template for a new subscriber (files starting with _ are ignored).
+# 1. Copy to subscribers/<name>.yaml (letters, digits, - and _ only). <name> is the subscriber's ID:
+#    its "already sent" list is seen/<name>.json, and  python main.py --subscriber <name>  runs just it.
+# 2. Add each webhook URL as a secret under the name in webhook_env:
+#    locally in .env, and on GitHub under Settings > Secrets and variables > Actions;
+#    a new secret name also needs one line in the Run digest step of .github/workflows/digest.yml.
+# Any setting from config.yaml (days_back, max_papers, model, ranking: ...) can be overridden here.
+name: "Example Lab"
+
+# EITHER a boolean query (words, "phrases", AND/OR/NOT, parentheses), translated for every source.
+# Preview:  python -m digest.query '"single cell" AND ("spatial transcriptomics" OR "spatial omics")'
+query: '"single cell" AND ("spatial transcriptomics" OR "spatial omics")'
+# OR a plain-English topic instead of query: (Kimi writes the boolean query on each run):
+# topic: "single-cell and spatial transcriptomics methods"
+# Optional: what the readers care about, in plain English. Kimi uses it to judge each paper's
+# relevance and to tailor the summaries (default: the topic: or query: above, plus key_words).
+# interest: "new computational methods for single-cell and spatial transcriptomics"
+
+# Extra sources besides PubMed (delete the ones you don't want). Add query: to one to override
+# the translated query in that source's own syntax.
+sources:
+  europepmc:        {enabled: true}
+  openalex:         {enabled: true}
+  semantic_scholar: {enabled: true}
+  arxiv:            {enabled: true}
+
+journals: []                  # only these journals (preprints are dropped when set)
+# days_back: 7
+# max_papers: 3
+
+ranking:
+  preferred_authors: []       # OpenAlex IDs (python -m digest.openalex "Author Name") or exact names
+  preferred_journals: []
+  key_words: []              # + keyword_credit each, found in title, abstract or author keywords
+  # min_relevance: 4          # drop papers Kimi scores below 4/10 for relevance
+  # min_author_h_index: 10
+
+# chinese_summary: true adds a Chinese translation under each English summary, in that chat only
+# (the English summary is always sent; the Chinese one isn't saved to history/).
+outputs:
+  slack:
+    enabled: true
+    webhook_env: SLACK_WEBHOOK_EXAMPLE_LAB
+    chinese_summary: false
+  wecom:
+    enabled: false
+    webhook_env: WECOM_URL_EXAMPLE_LAB
+    chinese_summary: false
+  email:
+    enabled: false
+    to: []                    # addresses (Bcc'd), or to_env: EMAIL_TO_EXAMPLE_LAB (secret, comma-separated)
+    chinese_summary: false
