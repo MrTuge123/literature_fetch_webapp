@@ -3,3 +3,4 @@ pyyaml
 python-dotenv
 openai
 pydantic>=2.7
+boto3>=1.34

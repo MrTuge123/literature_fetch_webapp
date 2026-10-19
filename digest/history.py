@@ -105,26 +105,39 @@ def load_history(sid):
 def save_history(sid, ranked, posted):
     """Add this run's candidates (best first, as ranked) to the subscriber's history.
     `posted` are the ones at least one chat received."""
-    today = datetime.now(timezone.utc).date().isoformat()
-    new = [record(p, rank, today, p in posted) for rank, p in enumerate(ranked, 1)]
     path = history_path(sid)
-    _write(path, read_history(path) + new)
+    _write(path, read_history(path) + new_records(ranked, posted))
 
 
-def set_references(sid, updates):
-    """Save OpenAlex IDs and reference lists looked up after a paper was first saved
-    (digest/connections.py): updates is {OpenAlex ID or DOI: {"openalex_id", "references"}}."""
-    if not updates:
-        return
-    path = history_path(sid)
-    records = read_history(path)
+def new_records(ranked, posted, today=None):
+    """This run's ranked candidates (best first) as history records; `posted` = ones a chat received."""
+    today = today or datetime.now(timezone.utc).date().isoformat()
+    return [record(p, rank, today, p in posted) for rank, p in enumerate(ranked, 1)]
+
+
+def combine(records):
+    """Records sharing any ID merged into one per paper (the rule every store uses)."""
+    return _combine(records)
+
+
+def apply_references(records, updates):
+    """Fill in OpenAlex IDs and reference lists looked up later (digest/connections.py):
+    updates is {OpenAlex ID or DOI: {"openalex_id", "references"}}. Changes records in place."""
     for r in records:
         u = updates.get(r.get("openalex_id")) or updates.get(r.get("doi"))
         if u:
             r["openalex_id"] = r.get("openalex_id") or u["openalex_id"]
             if u["references"]:
                 r["references"] = u["references"]
-    _write(path, records)
+    return records
+
+
+def set_references(sid, updates):
+    """Save OpenAlex IDs and reference lists looked up after a paper was first saved."""
+    if not updates:
+        return
+    path = history_path(sid)
+    _write(path, apply_references(read_history(path), updates))
 
 
 if __name__ == "__main__":
