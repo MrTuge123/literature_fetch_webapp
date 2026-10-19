@@ -3,25 +3,25 @@
 Also a tool to find an author's OpenAlex ID (names are ambiguous, IDs aren't):
     python -m digest.openalex "Meng Wang"
 """
-import os
 import re
 import sys
 import unicodedata
 
 import requests
 
+from digest import env
 from digest import paper as _paper
 
 BASE = "https://api.openalex.org"
-KEY = os.getenv("OPENALEX_API_KEY")
 WORK_FIELDS = "id,doi,type,publication_year,authorships,primary_location,keywords,referenced_works"
 session = requests.Session()
 _author_cache, _source_cache = {}, {}
 
 
 def _get(path, **params):
-    if KEY:
-        params["api_key"] = KEY
+    key = env.get("OPENALEX_API_KEY")          # read per call, not at import
+    if key:
+        params["api_key"] = key
     r = session.get(f"{BASE}/{path}", params=params, timeout=30)
     if r.status_code == 404:
         return None

@@ -1,18 +1,17 @@
 """PubMed (NCBI E-utilities). Uses the subscriber's query: in PubMed search-box syntax,
 restricted to papers added to PubMed in the last days_back days."""
-import os
 import xml.etree.ElementTree as ET
 
 import requests
 
-from digest import paper
+from digest import env, paper
 
 NAME = "PubMed"
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 
 def _key():
-    return os.getenv("NCBI_API_KEY")     # optional; raises limit to 10 req/sec
+    return env.get("NCBI_API_KEY")     # optional; raises limit to 10 req/sec
 
 
 def build_query(sub, query):

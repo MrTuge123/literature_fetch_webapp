@@ -12,6 +12,8 @@ import time
 import yaml
 from openai import OpenAI, RateLimitError
 
+from digest import env
+
 PROVIDERS = {
     "kimi": {"name": "Kimi", "key": "MOONSHOT_API_KEY", "base_url": "https://api.moonshot.ai/v1"},
     "groq": {"name": "Groq", "key": "GROQ_API_KEY", "base_url": "https://api.groq.com/openai/v1",
@@ -54,9 +56,10 @@ def _llm():
     global _client
     if _client is None:
         p = provider()
-        if not os.getenv(p["key"]):
+        key = env.get(p["key"])
+        if not key:
             raise RuntimeError(f"{p['key']} is not set (in .env or the GitHub secrets)")
-        _client = OpenAI(api_key=os.getenv(p["key"]), base_url=p["base_url"])
+        _client = OpenAI(api_key=key, base_url=p["base_url"])
     return _client
 
 

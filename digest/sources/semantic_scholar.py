@@ -2,12 +2,11 @@
 e.g.  graph neural network knowledge graph
 Without SEMANTIC_SCHOLAR_API_KEY it shares a public rate limit and is often refused (retried a few times)."""
 import datetime as dt
-import os
 import time
 
 import requests
 
-from digest import paper
+from digest import env, paper
 
 NAME = "Semantic Scholar"
 URL = "https://api.semanticscholar.org/graph/v1/paper/search"
@@ -16,7 +15,7 @@ PREPRINT_VENUES = ("arxiv", "biorxiv", "medrxiv", "ssrn", "research square", "pr
 
 
 def search(sub, query, since, limit):
-    key = os.getenv("SEMANTIC_SCHOLAR_API_KEY")
+    key = env.get("SEMANTIC_SCHOLAR_API_KEY")
     headers = {"x-api-key": key} if key else {}
     params = {"query": query, "fields": FIELDS, "limit": min(limit, 100),
               "publicationDateOrYear": f"{since.isoformat()}:{dt.date.today().isoformat()}"}
