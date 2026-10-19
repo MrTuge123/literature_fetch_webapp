@@ -15,7 +15,6 @@ from collections import Counter
 
 from digest import openalex
 from digest import paper as _paper
-from digest.history import load_history
 
 DEFAULTS = {"enabled": True, "min_relevance": 5, "max_share": 0.3, "max_items": 3, "refresh_days": 90}
 MIN_FOR_GENERIC = 20            # only call a reference generic once this many earlier papers have references
@@ -87,17 +86,21 @@ def _refresh(hist, cfg):
     return updates
 
 
-def find(top, sub):
+def find(top, sub, store=None):
     """(connections, refreshed). connections is None when there's nothing to show, else
     {"papers": n, "with_refs": k, "linked": earlier papers sharing references, "n_shared": shared works,
      "shared": [{"title", "year", "now", "earlier", "by": ['Wang et al. 2026', ...]}],
      "direct": [{"citing": 'Wang et al. 2026', "title", "date", "sent"}]}.
-    refreshed is what to save to history/ (see history.set_references)."""
+    refreshed is what to save to history/ (see history.set_references).
+    store: where earlier papers are read from (default: the history/ files)."""
     cfg = settings(sub)
     if not cfg["enabled"] or not top:
         return None, {}
     current = set().union(*(_paper.ids(p) for p in top))
-    hist = [r for r in load_history(sub["id"]) if not set(r["ids"]) & current and _counts(r, cfg)]
+    if store is None:
+        from digest.storage import FileStore
+        store = FileStore()
+    hist = [r for r in store.load_history(sub["id"]) if not set(r["ids"]) & current and _counts(r, cfg)]
     if not hist:
         return None, {}
     refreshed = _refresh(hist, cfg)

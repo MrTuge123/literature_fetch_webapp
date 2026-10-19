@@ -12,7 +12,6 @@ from openai import OpenAIError
 
 from digest import llm
 from digest import paper as _paper
-from digest.history import load_history
 from digest.summarizer import interest
 
 SYSTEM = ("You screen newly published papers for a research group. From each paper's title and "
@@ -36,10 +35,10 @@ def stamp(readers, model, thinking):
     return hashlib.sha1(f"{model}|{thinking}|{readers}".encode()).hexdigest()[:12]
 
 
-def _from_history(papers, sid, tag):
+def _from_history(papers, sid, tag, store):
     """Fill in scores earlier runs saved in history/<sid>.jsonl that were judged the same way.
     Returns how many papers got one."""
-    saved = {i: r["relevance"] for r in load_history(sid)
+    saved = {i: r["relevance"] for r in store.load_history(sid)
              if r.get("relevance") is not None and r.get("relevance_for") == tag for i in r["ids"]}
     n = 0
     for p in papers:
@@ -49,9 +48,10 @@ def _from_history(papers, sid, tag):
     return n
 
 
-def score_all(papers, sub):
+def score_all(papers, sub, store=None):
     """Set p["relevance"] on every paper: 0-10, or None if Kimi couldn't score it.
-    Scored papers also get p["relevance_for"], the stamp history/ saves with the score."""
+    Scored papers also get p["relevance_for"], the stamp history/ saves with the score.
+    store: where earlier scores are read from (default: the history/ files)."""
     model, readers = sub["model"], interest(sub)
     thinking = bool(sub["ranking"].get("relevance_thinking", False))
     tag = stamp(readers, model, thinking)
@@ -60,7 +60,10 @@ def score_all(papers, sub):
     if not readers:
         print("  No topic:/query:/interest: to judge relevance against; skipped.")
         return
-    reused = _from_history(papers, sub["id"], tag)
+    if store is None:
+        from digest.storage import FileStore
+        store = FileStore()
+    reused = _from_history(papers, sub["id"], tag, store)
     if reused:
         print(f"  Reused {reused} scores from earlier runs (same interest and model).")
     todo = [p for p in papers if p["relevance"] is None]
