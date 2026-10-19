@@ -11,3 +11,6 @@ subscribers/*.yaml
 !subscribers/_template.yaml
 .digest.lock
 *.tmp
+
+# local comparison output
+docs/baseline_*.txt
