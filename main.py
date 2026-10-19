@@ -1,7 +1,7 @@
 """For each subscriber: search PubMed, Europe PMC, OpenAlex, Semantic Scholar and arXiv for new
 papers, merge duplicates, rank them by author/journal impact (OpenAlex),
 score their relevance to the subscriber's interest (Kimi), summarize the top ones with Kimi, and post to that subscriber's Slack / WeCom.
-The steps live in digest/ (see digest/__init__.py for the map).
+The steps live in digest/pipeline.py (see digest/__init__.py for the map of digest/).
 
 Subscribers:   one file each in subscribers/ (copy subscribers/_template.yaml)
 Shared config: config.yaml (defaults; a subscriber's file overrides them)
@@ -16,67 +16,11 @@ import argparse
 import sys
 import traceback
 
-import requests
-
-from digest import connections, llm, notify, openalex, paper, ranking, relevance, sources, summarizer
-from digest.config import load_subscribers
-from digest.history import save_history, set_references
-from digest.store import load_seen, run_lock, save_seen
-
-
-def run_subscriber(sub, dry_run=False):
-    """The whole digest for one subscriber. Returns the chats that failed (empty if none)."""
-    print(f"\n========== {sub['name']} ({sub['id']}) ==========")
-    seen = load_seen(sub["id"])
-    papers, report = sources.search_all(sub)
-    print("Found:", sources.describe(report))
-    papers = [p for p in papers if not paper.ids(p) & seen]      # any shared ID = already sent
-    if not papers:
-        print("No new papers found.")
-        return []
-    print(f"{len(papers)} new candidates. Looking up authors/journals in OpenAlex...")
-    try:
-        openalex.enrich(papers)
-    except requests.RequestException as e:
-        print(f"Warning: OpenAlex lookup failed ({e}); ranking without it.")
-    if relevance.wanted(sub["ranking"]):
-        print(f"Scoring relevance with {llm.name()}...")
-        relevance.score_all(papers, sub)
-
-    papers = ranking.rank_papers(papers, sub["ranking"])
-    ranking.print_ranking(papers)
-    top = [p for p in papers if p["passed"]][:sub["max_papers"]]
-    if not top:
-        print("No papers passed the filters.")
-        if not dry_run:
-            save_history(sub["id"], papers, posted=[])
-        return []
-
-    print(f"Summarizing {len(top)} papers and writing the overview...")       # once, shared by every chat
-    overview = summarizer.summarize_all(top, sub["model"], sub, pool=papers)   # None for one paper, or if Kimi fails
-    overview_zh = None
-    if notify.wants_chinese(sub):           # some chat has chinese_summary: true (not saved to history/)
-        print("Translating into Chinese...")
-        overview_zh = summarizer.translate_all(top, overview, sub["model"], sub)
-    context = {"candidates": len(papers), "found": report, "overview": overview, "overview_zh": overview_zh}
-    refreshed = {}
-    try:                                    # links to earlier papers by references (OpenAlex, no Kimi)
-        context["connections"], refreshed = connections.find(top, sub)
-        c = context["connections"]
-        print(f"Connections: {c['n_shared']} shared references, {c['n_direct']} direct citations of earlier papers."
-              if c else "Connections: none to earlier papers.")
-    except requests.RequestException as e:
-        print(f"Warning: couldn't look up connections to earlier papers ({e}).")
-
-    posted, failed = notify.post(top, sub, dry_run, context)
-    if posted:                              # at least one chat has them, so don't post them again
-        if not dry_run:
-            save_seen(sub["id"], set().union(*(paper.ids(p) for p in top)))
-        print(f"Done: posted {len(top)} of {len(papers)} candidates to {' and '.join(posted)}.")
-    if not dry_run:                         # every ranked candidate, for trend summaries
-        save_history(sub["id"], papers, posted=top if posted else [])
-        set_references(sub["id"], refreshed)   # reference lists OpenAlex didn't have before
-    return failed
+from digest.config import load_preferences
+from digest.env import EnvSecrets
+from digest.pipeline import run_subscriber
+from digest.storage import FileStore
+from digest.store import run_lock
 
 
 def main():
@@ -87,15 +31,16 @@ def main():
                     help="run only this subscriber (its file name in subscribers/, without .yaml)")
     args = ap.parse_args()
 
+    store, secrets = FileStore(), EnvSecrets()      # seen/ + history/ files, .env / GitHub secrets
     failures = []
-    for sub in load_subscribers(args.subscriber):
+    for prefs in load_preferences(args.subscriber):
         try:
-            failed = run_subscriber(sub, args.dry_run)
+            failed = run_subscriber(prefs, store, secrets, args.dry_run)
         except Exception as e:              # one subscriber's problem shouldn't stop the others
             traceback.print_exc()
-            print(f"Error: {sub['id']} failed ({e})")
+            print(f"Error: {prefs.id} failed ({e})")
             failed = ["run"]
-        failures += [f"{sub['id']} ({name})" for name in failed]
+        failures += [f"{prefs.id} ({name})" for name in failed]
     if failures:
         sys.exit("Failed: " + ", ".join(failures))
 

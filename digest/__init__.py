@@ -1,6 +1,8 @@
 """Paper digest: find new papers, rank them, summarize them, post them to each subscriber's chats.
 
+    pipeline.py    run_subscriber(): one subscriber's whole digest, step by step
     config.py      load config.yaml + subscribers/*.yaml
+    prefs.py       Preferences: every setting, validated (typos and bad values are errors)
     paper.py       one paper record: IDs, link, merging duplicates
     sources/       PubMed, Europe PMC, OpenAlex, Semantic Scholar, arXiv (+ search_all)
     openalex.py    author h-index and journal citedness (+ author-ID lookup CLI)
@@ -10,7 +12,8 @@
     llm.py         Kimi client with rate-limit retries and JSON replies
     summarizer.py  summaries, overview and Chinese translations with Kimi (batched)
     notify/        build and send the digest to Slack / WeCom / email
-    env.py         read secrets from .env or GitHub
+    env.py         every secret read through one backend (.env / GitHub now, Parameter Store later)
+    storage.py     Store interface the pipeline uses for seen + history (FileStore = the files below)
     store.py       what each subscriber has already received (seen/), run lock
     history.py     every ranked candidate with its score (history/), for trend summaries
 """
