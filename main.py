@@ -11,6 +11,7 @@ All ranked:    history/<subscriber>.jsonl (every candidate with its score, for t
 Run all:          python main.py
 One subscriber:   python main.py --subscriber wang_lab
 Test only:        python main.py --dry-run   (prints ranking + messages, doesn't post or save)
+On DynamoDB:      python main.py --dry-run --store dynamodb --profile litfetch
 """
 import argparse
 import sys
@@ -29,9 +30,18 @@ def main():
                     help="print the ranking and messages; don't post or save")
     ap.add_argument("--subscriber", metavar="NAME",
                     help="run only this subscriber (its file name in subscribers/, without .yaml)")
+    ap.add_argument("--store", choices=["files", "dynamodb"], default="files",
+                    help="where seen papers and history live (default: the seen/ and history/ files)")
+    ap.add_argument("--profile", help="AWS CLI profile for --store dynamodb (e.g. litfetch)")
     args = ap.parse_args()
 
-    store, secrets = FileStore(), EnvSecrets()      # seen/ + history/ files, .env / GitHub secrets
+    secrets = EnvSecrets()                          # .env / GitHub secrets
+    if args.store == "dynamodb":
+        import boto3
+        from digest.dynamo_store import DynamoStore
+        store = DynamoStore(session=boto3.Session(profile_name=args.profile) if args.profile else None)
+    else:
+        store = FileStore()                         # seen/ + history/ files
     failures = []
     for prefs in load_preferences(args.subscriber):
         try:
