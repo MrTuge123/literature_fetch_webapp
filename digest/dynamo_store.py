@@ -18,6 +18,7 @@ from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from digest import history
@@ -26,6 +27,8 @@ from digest.prefs import Preferences
 DEFAULT_TABLE = "LitFetch"
 REGION = "us-east-2"
 SEEN_TTL_DAYS = 400        # longer than any days_back (max 365), so an expired ID can't come back in a search
+# Provisioned capacity throttles bursts (e.g. the migration); back off and retry instead of failing.
+RETRIES = Config(retries={"max_attempts": 12, "mode": "adaptive"})
 
 
 def to_dynamo(obj):
@@ -62,7 +65,7 @@ class DynamoStore:
         boto3.Session(profile_name="litfetch") locally; the default (the Lambda's role) on AWS."""
         session = session or boto3.Session()
         name = table_name or os.getenv("LITFETCH_TABLE") or DEFAULT_TABLE
-        self.table = session.resource("dynamodb", region_name=region).Table(name)
+        self.table = session.resource("dynamodb", region_name=region, config=RETRIES).Table(name)
 
     def _query(self, sid, prefix):
         """Every item of this subscriber whose SK starts with prefix (all pages)."""

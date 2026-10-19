@@ -24,6 +24,7 @@ def merged(path):
     return sub
 
 
+ROOT_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), config.CONFIG_FILE)
 FILES = sorted(glob.glob("subscribers/*.yaml"))       # _template.yaml always; real ones when present
 
 

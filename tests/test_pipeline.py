@@ -151,3 +151,16 @@ def test_a_plain_settings_dict_works_too(world):
     store = FakeStore()
     assert run_subscriber(prefs().to_sub(), store, FakeSecrets()) == []
     assert store.seen
+
+
+def test_runs_the_same_on_dynamodb(world, dynamo_table):
+    from digest.dynamo_store import DynamoStore
+    ds = DynamoStore()
+    assert run_subscriber(prefs(), ds, FakeSecrets()) == []
+    assert ds.load_seen("lab") == paper.ids(A) | paper.ids(B)
+    assert sorted(r["doi"] for r in ds.load_history("lab")) == ["10.1/a", "10.1/b", "10.1/c"]
+    world["slack"].clear()
+    run_subscriber(prefs(), ds, FakeSecrets())                # next week: A and B were sent already
+    assert len(world["llm_batches"]) == 1                     # C's score came back from DynamoDB history
+    (url, text), = world["slack"]
+    assert C["title"] in text and A["title"] not in text
