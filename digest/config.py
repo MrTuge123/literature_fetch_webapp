@@ -7,6 +7,8 @@ import sys
 
 import yaml
 
+from digest.prefs import Preferences, ValidationError, problems as _problems
+
 CONFIG_FILE = "config.yaml"
 SUBSCRIBERS_DIR = "subscribers"
 
@@ -20,8 +22,14 @@ def _deep_merge(base, over):
 
 
 def load_subscribers(only=None):
-    """Each subscribers/<id>.yaml layered over config.yaml. Files starting with _ are skipped.
-    Each subscriber also gets "id" (its file name), "file", "name" and a "ranking" dict."""
+    """Each subscriber's settings as the plain dict the pipeline reads (see load_preferences)."""
+    return [p.to_sub() for p in load_preferences(only)]
+
+
+def load_preferences(only=None):
+    """Each subscribers/<id>.yaml layered over config.yaml and validated (digest.prefs.Preferences).
+    Files starting with _ are skipped. Each also gets "id" (its file name), "file", "name" and a
+    "ranking" dict. A file with a typo or a bad value stops the run with a message naming it."""
     with open(CONFIG_FILE) as f:
         shared = yaml.safe_load(f) or {}
     subs = []
@@ -41,7 +49,10 @@ def load_subscribers(only=None):
         sub["file"] = path
         sub.setdefault("name", sid)
         sub["ranking"] = sub.get("ranking") or {}
-        subs.append(sub)
+        try:
+            subs.append(Preferences.model_validate(sub))
+        except ValidationError as e:
+            sys.exit(f"{path}: " + "; ".join(_problems(e)))
     if only and not subs:
         sys.exit(f"No subscriber '{only}' (expected {SUBSCRIBERS_DIR}/{only}.yaml)")
     if not subs:
