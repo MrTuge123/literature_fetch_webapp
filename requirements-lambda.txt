@@ -1,0 +1,6 @@
+# What the worker Lambda needs (boto3 is already in the Lambda runtime).
+requests
+pyyaml
+python-dotenv
+openai>=1.58,<2          # the version the dry runs were checked with; test before raising
+pydantic>=2.7

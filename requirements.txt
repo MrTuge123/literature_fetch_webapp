@@ -1,6 +1,6 @@
 requests
 pyyaml
 python-dotenv
-openai
+openai>=1.58,<2          # the version the dry runs were checked with; test before raising
 pydantic>=2.7
 boto3>=1.34

@@ -49,3 +49,58 @@ def test_data_survives_stack_deletion(template):
     (table,) = template.find_resources("AWS::DynamoDB::Table").values()
     assert table["DeletionPolicy"] == "Retain" and table["UpdateReplacePolicy"] == "Retain"
     assert table["Properties"]["DeletionProtectionEnabled"] is True
+
+
+# ---- backend stack (worker Lambda) ----
+
+from aws_cdk import aws_lambda as lambda_  # noqa: E402
+from litfetch_infra.backend_stack import SSM_PREFIX, WORKER_NAME, BackendStack  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def backend():
+    app = cdk.App()
+    stack = BackendStack(app, "Backend", env=cdk.Environment(account="123456789012", region="us-east-2"),
+                         code=lambda_.Code.from_inline("def handler(event, context): pass"))   # no pip in tests
+    return Template.from_stack(stack)
+
+
+def test_worker_function_settings(backend):
+    backend.has_resource_properties("AWS::Lambda::Function", {
+        "FunctionName": WORKER_NAME,
+        "Runtime": "python3.12",
+        "Architectures": ["arm64"],
+        "Handler": "api.worker.handler",
+        "Timeout": 900,
+        "MemorySize": 1024,
+        "Environment": {"Variables": {"LITFETCH_TABLE": TABLE_NAME, "LITFETCH_SSM_PREFIX": SSM_PREFIX,
+                                      "LITFETCH_DRY_RUN_DEFAULT": "true"}},
+    })
+
+
+def test_failed_runs_are_not_retried(backend):
+    backend.has_resource_properties("AWS::Lambda::EventInvokeConfig", {"MaximumRetryAttempts": 0})
+
+
+def test_logs_expire(backend):
+    backend.has_resource_properties("AWS::Logs::LogGroup", {
+        "LogGroupName": f"/aws/lambda/{WORKER_NAME}", "RetentionInDays": 14})
+
+
+def test_permissions_are_only_the_table_and_its_parameters(backend):
+    (policy,) = backend.find_resources("AWS::IAM::Policy").values()
+    statements = policy["Properties"]["PolicyDocument"]["Statement"]
+    text = str(statements)
+    assert "dynamodb:PutItem" in text and "dynamodb:Query" in text and f"table/{TABLE_NAME}" in text
+    ssm = [s for s in statements if s["Action"] == "ssm:GetParametersByPath"]
+    assert ssm and all("parameter/litfetch" in str(r) for r in ssm[0]["Resource"])
+    kms = [s for s in statements if s["Action"] == "kms:Decrypt"]
+    assert kms[0]["Condition"] == {"StringEquals": {"kms:ViaService": "ssm.us-east-2.amazonaws.com"}}
+    assert not any(s["Action"] == "*" or s.get("Resource") == "*" and s["Action"] != "kms:Decrypt"
+                   for s in statements)                    # no wildcard permissions besides the scoped KMS one
+
+
+def test_package_contains_only_code_not_secrets_or_data():
+    from litfetch_infra import bundling
+    names = {rel.split("/")[0] for rel, _ in bundling._files()}
+    assert names == {"digest", "api", "config.yaml", "requirements-lambda.txt"}

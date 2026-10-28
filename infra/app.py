@@ -8,6 +8,7 @@ import os
 
 import aws_cdk as cdk
 
+from litfetch_infra.backend_stack import BackendStack
 from litfetch_infra.data_stack import DataStack
 
 REGION = "us-east-2"
@@ -17,6 +18,8 @@ env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=REGION)
 
 DataStack(app, "LitFetchData", env=env,
           description="Literature Fetch: one DynamoDB table for preferences, seen papers and history")
+BackendStack(app, "LitFetchBackend", env=env,
+             description="Literature Fetch: worker Lambda (queue and schedule come in M4)")
 
 cdk.Tags.of(app).add("project", "literature-fetch")       # every resource, so costs can be filtered
 app.synth()
