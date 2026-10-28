@@ -1,3 +1,4 @@
 -r requirements.txt
 pytest>=8
 moto[dynamodb]>=5
+botocore[crt]   # lets boto3 use `aws login` credentials locally (Lambda does not need it)
