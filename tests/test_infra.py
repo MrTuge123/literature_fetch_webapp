@@ -168,3 +168,62 @@ def test_three_alarms_email_the_alerts_topic(backend):
 def test_alert_email_is_subscribed_when_given():
     make_backend(alert_email="me@example.edu").has_resource_properties(
         "AWS::SNS::Subscription", {"Protocol": "email", "Endpoint": "me@example.edu"})
+
+
+# ---- M5: sign-in and API ----
+
+from litfetch_infra import api_stack  # noqa: E402
+from api import http as api_http  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def api_template():
+    app = cdk.App()
+    stack = api_stack.ApiStack(app, "Api", env=cdk.Environment(account="123456789012", region="us-east-2"),
+                               code=lambda_.Code.from_inline("def handler(event, context): pass"),
+                               web_origins=["http://localhost:5173", "https://site.example"])
+    return Template.from_stack(stack)
+
+
+def test_user_pool_is_invite_only_email_login_and_kept(api_template):
+    pools = api_template.find_resources("AWS::Cognito::UserPool")
+    (pool,) = pools.values()
+    props = pool["Properties"]
+    assert pool["DeletionPolicy"] == "Retain" and props["DeletionProtection"] == "ACTIVE"
+    assert props["UsernameAttributes"] == ["email"] and props["AutoVerifiedAttributes"] == ["email"]
+    assert props["UserPoolTier"] == "LITE"
+    assert "PreSignUp" in props["LambdaConfig"]
+    api_template.has_resource_properties("AWS::Cognito::UserPoolGroup", {"GroupName": "admins"})
+
+
+def test_web_client_has_no_secret(api_template):
+    api_template.has_resource_properties("AWS::Cognito::UserPoolClient", {
+        "GenerateSecret": False, "PreventUserExistenceErrors": "ENABLED",
+        "ExplicitAuthFlows": Match.array_with(["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"])})
+
+
+def test_every_api_route_exists_and_only_health_is_public(api_template):
+    routes = {r["Properties"]["RouteKey"]: r["Properties"].get("AuthorizationType", "NONE")
+              for r in api_template.find_resources("AWS::ApiGatewayV2::Route").values()}
+    assert set(routes) == {f"{m} {p}" for (m, p) in api_http.ROUTES}       # infra matches api/http.py
+    assert {k for k, auth in routes.items() if auth != "JWT"} == {"GET /health"}
+
+
+def test_cors_and_throttling(api_template):
+    api_template.has_resource_properties("AWS::ApiGatewayV2::Api", {"CorsConfiguration": {
+        "AllowOrigins": ["http://localhost:5173", "https://site.example"],
+        "AllowHeaders": ["authorization", "content-type"],
+        "AllowMethods": Match.any_value(), "MaxAge": 3600}})
+    api_template.has_resource_properties("AWS::ApiGatewayV2::Stage", {
+        "DefaultRouteSettings": {"ThrottlingRateLimit": 10, "ThrottlingBurstLimit": 20}})
+
+
+def test_api_function_permissions_are_scoped(api_template):
+    policy = policy_of(api_template, "ApiFnServiceRole")
+    statements = policy["Properties"]["PolicyDocument"]["Statement"]
+    webhook = [s for s in statements if "ssm:PutParameter" in s["Action"]]
+    assert webhook and all("SLACK_WEBHOOK_*" in str(r) for r in [webhook[0]["Resource"]])
+    assert any(s["Action"] == "cognito-idp:AdminDeleteUser" for s in statements)
+    assert not any(s.get("Resource") == "*" and "kms:" not in str(s["Action"]) for s in statements)
+    presignup = str(policy_of(api_template, "PreSignUpServiceRole")["Properties"]["PolicyDocument"])
+    assert "dynamodb:UpdateItem" in presignup and "PutItem" not in presignup and "Scan" not in presignup

@@ -8,6 +8,7 @@ import os
 
 import aws_cdk as cdk
 
+from litfetch_infra.api_stack import ApiStack
 from litfetch_infra.backend_stack import BackendStack
 from litfetch_infra.data_stack import DataStack
 
@@ -24,6 +25,11 @@ BackendStack(app, "LitFetchBackend", env=env,
              schedule_enabled=app.node.try_get_context("schedule") == "on",
              alert_email=os.getenv("LITFETCH_ALERT_EMAIL"),
              description="Literature Fetch: weekly schedule, dispatch, jobs queue, worker, alerts")
+
+# cdk deploy -c webOrigins=https://a.example,http://localhost:5173   sites allowed to call the API
+ApiStack(app, "LitFetchApi", env=env,
+         web_origins=(app.node.try_get_context("webOrigins") or "http://localhost:5173").split(","),
+         description="Literature Fetch: sign-in (Cognito) and the website's API")
 
 cdk.Tags.of(app).add("project", "literature-fetch")       # every resource, so costs can be filtered
 app.synth()
