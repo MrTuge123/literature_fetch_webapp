@@ -1,5 +1,17 @@
 {
   "app": "python3 app.py",
-  "watch": {"include": ["**"], "exclude": ["cdk.out", "**/__pycache__", "tests"]},
-  "context": {}
+  "watch": {
+    "include": [
+      "**"
+    ],
+    "exclude": [
+      "cdk.out",
+      "**/__pycache__",
+      "tests"
+    ]
+  },
+  "context": {
+    "schedule": "off",
+    "dryRun": "on"
+  }
 }

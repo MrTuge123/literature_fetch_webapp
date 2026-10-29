@@ -1,7 +1,7 @@
 """The backend stack: everything that runs the weekly digest.
 
     litfetch-weekly        EventBridge Scheduler, Mondays 7:00 New York time -> litfetch-dispatch.
-                           Created switched off; deploy with -c schedule=on at the M9 cut-over.
+                           On/off and dry run are set in infra/cdk.json (see docs/CUTOVER.md).
     litfetch-dispatch      Lambda: one job per subscriber -> litfetch-jobs.fifo.
     litfetch-jobs.fifo     SQS FIFO queue. One message group, so the worker gets one user at a time.
                            A job that fails twice moves to litfetch-jobs-failed.fifo (kept 14 days).
@@ -40,9 +40,12 @@ MAX_TRIES = 2                       # a job that fails twice goes to the failed-
 
 class BackendStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *, code: lambda_.Code | None = None,
-                 schedule_enabled: bool = False, alert_email: str | None = None, **kwargs) -> None:
+                 schedule_enabled: bool = False, dry_run_default: bool = True,
+                 alert_email: str | None = None, **kwargs) -> None:
         """code: the Lambda zip (default: built by bundling.py; tests pass a stub).
-        schedule_enabled: whether the weekly schedule runs (off until the M9 cut-over).
+        schedule_enabled: whether the weekly schedule runs.
+        dry_run_default: jobs only log what they would send (and save nothing) unless the job
+            says otherwise. True until the M9 cut-over, while slack_post still sends the digest.
         alert_email: who gets alarm emails (AWS sends a confirmation link first)."""
         super().__init__(scope, construct_id, **kwargs)
 
@@ -75,7 +78,7 @@ class BackendStack(Stack):
             environment={
                 "LITFETCH_TABLE": TABLE_NAME,
                 "LITFETCH_SSM_PREFIX": SSM_PREFIX,
-                "LITFETCH_DRY_RUN_DEFAULT": "true",          # until the M9 cut-over
+                "LITFETCH_DRY_RUN_DEFAULT": "true" if dry_run_default else "false",
             },
         )
 
@@ -188,3 +191,4 @@ class BackendStack(Stack):
         CfnOutput(self, "JobsQueueUrl", value=self.jobs.queue_url)
         CfnOutput(self, "FailedJobsQueueUrl", value=self.failed_jobs.queue_url)
         CfnOutput(self, "ScheduleEnabled", value=str(schedule_enabled))
+        CfnOutput(self, "DryRunDefault", value=str(dry_run_default))

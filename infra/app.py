@@ -20,11 +20,27 @@ env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=REGION)
 
 DataStack(app, "LitFetchData", env=env,
           description="Literature Fetch: one DynamoDB table for preferences, seen papers and history")
-# cdk deploy -c schedule=on   turns the weekly schedule on (do it at the M9 cut-over)
-# LITFETCH_ALERT_EMAIL=you@x  who gets alarm emails (kept out of the repo; AWS asks you to confirm)
+# The weekly run is set in cdk.json (committed, so every deploy keeps it):
+#   "schedule": "on" | "off"     whether litfetch-weekly runs on Mondays
+#   "dryRun":   "on" | "off"     on = jobs only log what they'd send; off = really send (M9 cut-over)
+# Who gets alarm emails is personal, so it stays out of the repo: put it in ~/.cdk.json as
+#   {"context": {"alertEmail": "you@umich.edu"}}     (or set LITFETCH_ALERT_EMAIL).
+# Without it, deploying would unsubscribe the alarm emails, so it's required (unless "none").
+def flag(name, default):
+    value = str(app.node.try_get_context(name) or default).lower()
+    if value not in ("on", "off"):
+        raise SystemExit(f'cdk.json context "{name}" must be "on" or "off", not {value!r}')
+    return value == "on"
+
+
+alert_email = app.node.try_get_context("alertEmail") or os.getenv("LITFETCH_ALERT_EMAIL")
+if not alert_email:
+    raise SystemExit('Set the alarm email first: ~/.cdk.json {"context": {"alertEmail": "you@umich.edu"}} '
+                     '(or LITFETCH_ALERT_EMAIL=...); use "none" for no alarm emails.')
 BackendStack(app, "LitFetchBackend", env=env,
-             schedule_enabled=app.node.try_get_context("schedule") == "on",
-             alert_email=os.getenv("LITFETCH_ALERT_EMAIL"),
+             schedule_enabled=flag("schedule", "off"),
+             dry_run_default=flag("dryRun", "on"),
+             alert_email=None if alert_email == "none" else alert_email,
              description="Literature Fetch: weekly schedule, dispatch, jobs queue, worker, alerts")
 
 # Build the site first (cd web && npm run build): this copies web/dist to S3 behind CloudFront.

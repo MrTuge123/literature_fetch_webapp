@@ -159,6 +159,23 @@ def test_schedule_is_mondays_7am_new_york_and_off_by_default(backend):
         "ScheduleExpressionTimezone": "America/New_York", "State": "DISABLED"})
 
 
+def worker_env(template):
+    (fn,) = [r for k, r in template.find_resources("AWS::Lambda::Function").items() if k.startswith("Worker")]
+    return fn["Properties"]["Environment"]["Variables"]
+
+
+def test_dry_run_by_default_and_can_be_turned_off(backend):
+    assert worker_env(backend)["LITFETCH_DRY_RUN_DEFAULT"] == "true"
+    assert worker_env(make_backend(dry_run_default=False))["LITFETCH_DRY_RUN_DEFAULT"] == "false"
+
+
+def test_cdk_json_keeps_the_weekly_settings():
+    import json
+    context = json.load(open(os.path.join("infra", "cdk.json")))["context"]
+    assert context["schedule"] in ("on", "off") and context["dryRun"] in ("on", "off")
+    assert "alertEmail" not in context                     # personal: ~/.cdk.json, not the repo
+
+
 def test_schedule_can_be_turned_on():
     make_backend(schedule_enabled=True).has_resource_properties(
         "AWS::Scheduler::Schedule", {"State": "ENABLED"})
