@@ -62,7 +62,6 @@ class WebStack(Stack):
             error_responses=spa,
             price_class=cloudfront.PriceClass.PRICE_CLASS_100,
             http_version=cloudfront.HttpVersion.HTTP2_AND_3,
-            minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
         )
         self.url = f"https://{self.distribution.distribution_domain_name}"
 
