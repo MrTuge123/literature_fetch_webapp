@@ -227,3 +227,90 @@ def test_api_function_permissions_are_scoped(api_template):
     assert not any(s.get("Resource") == "*" and "kms:" not in str(s["Action"]) for s in statements)
     presignup = str(policy_of(api_template, "PreSignUpServiceRole")["Properties"]["PolicyDocument"])
     assert "dynamodb:UpdateItem" in presignup and "PutItem" not in presignup and "Scan" not in presignup
+
+
+# ---------- website stack (M7) ----------
+
+from litfetch_infra import web_stack  # noqa: E402
+
+ENV = cdk.Environment(account="123456789012", region="us-east-2")
+
+
+@pytest.fixture(scope="module")
+def built_site(tmp_path_factory):
+    d = tmp_path_factory.mktemp("dist")
+    (d / "assets").mkdir()
+    (d / "index.html").write_text("<html></html>")
+    (d / "assets" / "index-abc123.js").write_text("console.log(1)")
+    return str(d)
+
+
+@pytest.fixture(scope="module")
+def web(built_site):
+    app = cdk.App()
+    stack = web_stack.WebStack(app, "Web", env=ENV, dist_dir=built_site)
+    return stack, Template.from_stack(stack)
+
+
+def test_bucket_is_private_and_https_only(web):
+    _, t = web
+    t.has_resource_properties("AWS::S3::Bucket", {"PublicAccessBlockConfiguration": {
+        "BlockPublicAcls": True, "BlockPublicPolicy": True, "IgnorePublicAcls": True, "RestrictPublicBuckets": True}})
+    statements = [s for p in t.find_resources("AWS::S3::BucketPolicy").values()
+                  for s in p["Properties"]["PolicyDocument"]["Statement"]]
+    assert any(s["Effect"] == "Deny" and s["Condition"] == {"Bool": {"aws:SecureTransport": "false"}}
+               for s in statements)
+    reads = [s for s in statements if s["Action"] == "s3:GetObject"]
+    assert len(reads) == 1                                        # only CloudFront reads files
+    assert reads[0]["Principal"] == {"Service": "cloudfront.amazonaws.com"}
+    assert "AWS:SourceArn" in reads[0]["Condition"]["StringEquals"]   # ...and only this distribution
+
+
+def test_cloudfront_uses_oac_https_and_spa_routing(web):
+    _, t = web
+    t.resource_count_is("AWS::CloudFront::OriginAccessControl", 1)
+    (dist,) = t.find_resources("AWS::CloudFront::Distribution").values()
+    cfg = dist["Properties"]["DistributionConfig"]
+    assert "OriginAccessControlId" in cfg["Origins"][0]
+    assert cfg["DefaultRootObject"] == "index.html"
+    assert cfg["DefaultCacheBehavior"]["ViewerProtocolPolicy"] == "redirect-to-https"
+    assert cfg["PriceClass"] == "PriceClass_100"
+    assert {(e["ErrorCode"], e["ResponseCode"], e["ResponsePagePath"]) for e in cfg["CustomErrorResponses"]} == {
+        (403, 200, "/index.html"), (404, 200, "/index.html")}
+
+
+def test_deploys_assets_cached_and_index_not_cached(web):
+    _, t = web
+    deployments = t.find_resources("Custom::CDKBucketDeployment")
+    assert len(deployments) == 2
+    by_cache = {str(d["Properties"].get("SystemMetadata")): d["Properties"] for d in deployments.values()}
+    long = next(p for k, p in by_cache.items() if "immutable" in k)
+    index = next(p for k, p in by_cache.items() if "no-cache" in k)
+    assert "DistributionId" not in long and index["DistributionPaths"] == ["/index.html"]
+    assert long["Prune"] is False and index["Prune"] is False
+
+
+def test_index_and_assets_are_split(built_site, tmp_path):
+    app = cdk.App(outdir=str(tmp_path))
+    web_stack.WebStack(app, "Web", env=ENV, dist_dir=built_site)
+    app.synth()
+    folders = [p for p in tmp_path.glob("asset.*") if p.is_dir()]
+    contents = {tuple(sorted(str(f.relative_to(p)) for f in p.rglob("*") if f.is_file())) for p in folders}
+    assert ("index.html",) in contents and ("assets/index-abc123.js",) in contents
+
+
+def test_no_build_means_no_deployment(tmp_path):
+    app = cdk.App()
+    stack = web_stack.WebStack(app, "Web", env=ENV, dist_dir=str(tmp_path))
+    Template.from_stack(stack).resource_count_is("Custom::CDKBucketDeployment", 0)
+
+
+def test_api_cors_allows_the_cloudfront_site(built_site):
+    app = cdk.App()
+    stack = web_stack.WebStack(app, "Web", env=ENV, dist_dir=built_site)
+    api = api_stack.ApiStack(app, "ApiWithSite", env=ENV,
+                             code=lambda_.Code.from_inline("def handler(event, context): pass"),
+                             web_origins=[stack.url, "http://localhost:5173"])
+    (cors_api,) = Template.from_stack(api).find_resources("AWS::ApiGatewayV2::Api").values()
+    origins = cors_api["Properties"]["CorsConfiguration"]["AllowOrigins"]
+    assert "http://localhost:5173" in origins and "Fn::ImportValue" in str(origins[0])
