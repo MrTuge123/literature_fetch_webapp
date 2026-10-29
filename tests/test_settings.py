@@ -20,12 +20,14 @@ def test_becomes_full_preferences_with_shared_defaults():
     assert sub["id"] == USER and sub["model"] and sub["provider"]              # from config.yaml
     assert sub["sources"]["pubmed"]["enabled"] and not sub["sources"]["openalex"]["enabled"]
     assert sub["outputs"]["email"] == {"enabled": True, "to": ["me@umich.edu"], "chinese_summary": False}
-    assert sub["outputs"]["slack"]["enabled"] is False                          # no webhook saved yet
+    assert sub["outputs"]["slack"]["enabled"] is False                          # not chosen
     assert sub["outputs"]["slack"]["webhook_env"] == webhook_secret(USER)
 
 
 def test_slack_only_with_their_own_webhook():
     s = good(delivery={"slack": True, "email": False})
+    with pytest.raises(ValueError, match="webhook first"):
+        to_preferences(USER, "me@umich.edu", s, has_webhook=False)
     sub = to_preferences(USER, "me@umich.edu", s, has_webhook=True).to_sub()
     assert sub["outputs"]["slack"] == {"enabled": True, "webhook_env": "SLACK_WEBHOOK_3f1c_uuid_1234",
                                        "chinese_summary": False}

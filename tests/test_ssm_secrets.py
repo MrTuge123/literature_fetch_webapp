@@ -56,3 +56,14 @@ def test_plugs_into_digest_env(ssm):
         assert env.get("OPENALEX_API_KEY") == "oa"
     finally:
         env.use(previous)
+
+
+def test_a_secret_added_later_is_found_after_a_minute(ssm, monkeypatch):
+    client, put = ssm
+    put("/litfetch/A", "a")
+    s = ParameterStoreSecrets()
+    assert s.get("A") == "a" and s.get("NEW") is None
+    put("/litfetch/NEW", "new")
+    assert s.get("NEW") is None                               # just loaded: not asked again yet
+    monkeypatch.setattr(s, "_loaded_at", s._loaded_at - 61)
+    assert s.get("NEW") == "new"

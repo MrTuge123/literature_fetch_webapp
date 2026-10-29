@@ -97,7 +97,9 @@ def _shared():
 
 def to_preferences(user_id, email, s: UserSettings, has_webhook: bool) -> Preferences:
     """The full settings the pipeline runs with: config.yaml's defaults + what the user chose,
-    with delivery wired to their own webhook and address only."""
+    with delivery wired to their own webhook and address only. Slack needs a saved webhook."""
+    if s.delivery.slack and not has_webhook:
+        raise ValueError("save a Slack webhook first (PUT /me/webhook), or switch Slack off")
     shared = _shared()
     sources = {k: {"enabled": False} for k in SOURCE_KEYS}
     for k, choice in s.sources.items():
@@ -111,7 +113,7 @@ def to_preferences(user_id, email, s: UserSettings, has_webhook: bool) -> Prefer
         "sources": sources,
         "ranking": s.ranking.model_dump(),
         "outputs": {
-            "slack": {"enabled": s.delivery.slack and has_webhook, "webhook_env": webhook_secret(user_id),
+            "slack": {"enabled": s.delivery.slack, "webhook_env": webhook_secret(user_id),
                       "chinese_summary": s.delivery.chinese_summary},
             "email": {"enabled": s.delivery.email, "to": [email], "chinese_summary": s.delivery.chinese_summary},
             "wecom": {"enabled": False},
