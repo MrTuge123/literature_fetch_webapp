@@ -4,16 +4,23 @@
 cd infra
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cdk synth                              # build the templates (and the worker zip) locally, no AWS calls
+cdk synth                              # build the templates (and the Lambda zip) locally, no AWS calls
 cdk diff   --profile litfetch          # what a deploy would change
 cdk deploy --all --profile litfetch    # create / update every stack
 ```
 
+Options for the backend stack:
+
+| How | What |
+| --- | --- |
+| `LITFETCH_ALERT_EMAIL=you@umich.edu cdk deploy ...` | alarm emails go there (AWS emails a confirmation link first) |
+| `cdk deploy -c schedule=on ...` | turn the Monday schedule on (M9 cut-over; it is off otherwise) |
+
 | Stack | Contents |
 | --- | --- |
 | `LitFetchData` | DynamoDB table `LitFetch` (PK/SK, provisioned 10/10, TTL on `ttl`, retained on delete, deletion protection on) |
-| `LitFetchBackend` | Lambda `litfetch-worker` (Python 3.12, arm64, 1 GB, 15 min, no async retries, logs 14 days), its IAM role (table + `/litfetch/*` parameters only) |
+| `LitFetchBackend` | `litfetch-weekly` schedule (Mon 7:00 New York, off until M9) → `litfetch-dispatch` Lambda → `litfetch-jobs.fifo` queue (failed twice → `litfetch-jobs-failed.fifo`) → `litfetch-worker` Lambda (one user at a time). `litfetch-alerts` SNS topic + 3 alarms (failed job, dispatch error, posting failed). |
 
-Region is always `us-east-2` (see `app.py`). The worker is packaged without Docker:
+Region is always `us-east-2` (see `app.py`). Both Lambdas share one zip, built without Docker:
 `litfetch_infra/bundling.py` runs `pip install --platform manylinux2014_aarch64` and copies
 `digest/`, `api/` and `config.yaml` (never `.env`, `seen/`, `history/` or `subscribers/`).

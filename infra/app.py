@@ -18,8 +18,12 @@ env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=REGION)
 
 DataStack(app, "LitFetchData", env=env,
           description="Literature Fetch: one DynamoDB table for preferences, seen papers and history")
+# cdk deploy -c schedule=on   turns the weekly schedule on (do it at the M9 cut-over)
+# LITFETCH_ALERT_EMAIL=you@x  who gets alarm emails (kept out of the repo; AWS asks you to confirm)
 BackendStack(app, "LitFetchBackend", env=env,
-             description="Literature Fetch: worker Lambda (queue and schedule come in M4)")
+             schedule_enabled=app.node.try_get_context("schedule") == "on",
+             alert_email=os.getenv("LITFETCH_ALERT_EMAIL"),
+             description="Literature Fetch: weekly schedule, dispatch, jobs queue, worker, alerts")
 
 cdk.Tags.of(app).add("project", "literature-fetch")       # every resource, so costs can be filtered
 app.synth()

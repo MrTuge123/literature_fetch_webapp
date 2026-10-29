@@ -8,8 +8,8 @@ PREFS item and sends one message per user to the FIFO queue the worker reads:
     {"dry_run": true}                           pass a dry_run flag on to every job
 
 All messages share one message group, so the worker gets them one at a time (Groq's per-minute
-limit can't take several users at once). The deduplication ID is user + date, so if the
-schedule fires twice the same day, nobody gets two digests.
+limit can't take several users at once). The deduplication ID is user + date: SQS drops a
+repeat sent within 5 minutes (a retried invocation), so a retry can't queue anyone twice.
 """
 import datetime as dt
 import json

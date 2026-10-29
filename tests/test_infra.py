@@ -54,15 +54,21 @@ def test_data_survives_stack_deletion(template):
 # ---- backend stack (worker Lambda) ----
 
 from aws_cdk import aws_lambda as lambda_  # noqa: E402
-from litfetch_infra.backend_stack import SSM_PREFIX, WORKER_NAME, BackendStack  # noqa: E402
+from litfetch_infra.backend_stack import (DISPATCH_NAME, FAILED_QUEUE, JOBS_QUEUE, MAX_TRIES,  # noqa: E402
+                                         SCHEDULE_NAME, SSM_PREFIX, WORKER_NAME, BackendStack)
+
+
+def make_backend(**kw):
+    app = cdk.App()
+    stack = BackendStack(app, "Backend", env=cdk.Environment(account="123456789012", region="us-east-2"),
+                         code=lambda_.Code.from_inline("def handler(event, context): pass"),   # no pip in tests
+                         **kw)
+    return Template.from_stack(stack)
 
 
 @pytest.fixture(scope="module")
 def backend():
-    app = cdk.App()
-    stack = BackendStack(app, "Backend", env=cdk.Environment(account="123456789012", region="us-east-2"),
-                         code=lambda_.Code.from_inline("def handler(event, context): pass"))   # no pip in tests
-    return Template.from_stack(stack)
+    return make_backend()
 
 
 def test_worker_function_settings(backend):
@@ -87,8 +93,13 @@ def test_logs_expire(backend):
         "LogGroupName": f"/aws/lambda/{WORKER_NAME}", "RetentionInDays": 14})
 
 
+def policy_of(template, role_prefix):
+    (policy,) = [r for k, r in template.find_resources("AWS::IAM::Policy").items() if k.startswith(role_prefix)]
+    return policy
+
+
 def test_permissions_are_only_the_table_and_its_parameters(backend):
-    (policy,) = backend.find_resources("AWS::IAM::Policy").values()
+    policy = policy_of(backend, "WorkerServiceRole")
     statements = policy["Properties"]["PolicyDocument"]["Statement"]
     text = str(statements)
     assert "dynamodb:PutItem" in text and "dynamodb:Query" in text and f"table/{TABLE_NAME}" in text
@@ -96,6 +107,7 @@ def test_permissions_are_only_the_table_and_its_parameters(backend):
     assert ssm and all("parameter/litfetch" in str(r) for r in ssm[0]["Resource"])
     kms = [s for s in statements if s["Action"] == "kms:Decrypt"]
     assert kms[0]["Condition"] == {"StringEquals": {"kms:ViaService": "ssm.us-east-2.amazonaws.com"}}
+    assert any("sqs:ReceiveMessage" in s["Action"] for s in statements)      # reads its job queue
     assert not any(s["Action"] == "*" or s.get("Resource") == "*" and s["Action"] != "kms:Decrypt"
                    for s in statements)                    # no wildcard permissions besides the scoped KMS one
 
@@ -104,3 +116,55 @@ def test_package_contains_only_code_not_secrets_or_data():
     from litfetch_infra import bundling
     names = {rel.split("/")[0] for rel, _ in bundling._files()}
     assert names == {"digest", "api", "config.yaml", "requirements-lambda.txt"}
+
+
+# ---- M4: queue, dispatch, schedule, alerts ----
+
+def test_jobs_queue_is_fifo_with_a_failed_jobs_queue(backend):
+    backend.has_resource_properties("AWS::SQS::Queue", {
+        "QueueName": JOBS_QUEUE, "FifoQueue": True,
+        "VisibilityTimeout": 5400,                            # >= 6 x the worker's 900 s, as AWS advises
+        "RedrivePolicy": {"maxReceiveCount": MAX_TRIES, "deadLetterTargetArn": Match.any_value()},
+    })
+    backend.has_resource_properties("AWS::SQS::Queue", {
+        "QueueName": FAILED_QUEUE, "FifoQueue": True, "MessageRetentionPeriod": 14 * 86400})
+
+
+def test_worker_reads_the_queue_one_job_at_a_time(backend):
+    backend.has_resource_properties("AWS::Lambda::EventSourceMapping", {
+        "BatchSize": 1, "FunctionResponseTypes": ["ReportBatchItemFailures"]})
+
+
+def test_dispatch_function_and_its_permissions(backend):
+    backend.has_resource_properties("AWS::Lambda::Function", {
+        "FunctionName": DISPATCH_NAME, "Handler": "api.dispatch.handler", "Architectures": ["arm64"],
+        "Environment": {"Variables": {"LITFETCH_TABLE": TABLE_NAME, "LITFETCH_QUEUE_URL": Match.any_value()}},
+    })
+    actions = str(policy_of(backend, "DispatchServiceRole")["Properties"]["PolicyDocument"])
+    assert "dynamodb:Scan" in actions and "sqs:SendMessage" in actions
+    assert "dynamodb:PutItem" not in actions and "ssm:" not in actions          # read-only, no secrets
+
+
+def test_schedule_is_mondays_7am_new_york_and_off_by_default(backend):
+    backend.has_resource_properties("AWS::Scheduler::Schedule", {
+        "Name": SCHEDULE_NAME, "ScheduleExpression": "cron(0 7 ? * MON *)",
+        "ScheduleExpressionTimezone": "America/New_York", "State": "DISABLED"})
+
+
+def test_schedule_can_be_turned_on():
+    make_backend(schedule_enabled=True).has_resource_properties(
+        "AWS::Scheduler::Schedule", {"State": "ENABLED"})
+
+
+def test_three_alarms_email_the_alerts_topic(backend):
+    alarms = backend.find_resources("AWS::CloudWatch::Alarm")
+    assert len(alarms) == 3                                   # free tier: 10
+    assert all(a["Properties"]["AlarmActions"] and a["Properties"]["TreatMissingData"] == "notBreaching"
+               for a in alarms.values())
+    backend.has_resource_properties("AWS::Logs::MetricFilter", {"FilterPattern": '"posting failed"'})
+    backend.resource_count_is("AWS::SNS::Subscription", 0)    # no email unless one is given
+
+
+def test_alert_email_is_subscribed_when_given():
+    make_backend(alert_email="me@example.edu").has_resource_properties(
+        "AWS::SNS::Subscription", {"Protocol": "email", "Endpoint": "me@example.edu"})
