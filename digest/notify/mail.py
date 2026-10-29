@@ -1,11 +1,17 @@
-"""Email over SMTP (e.g. a Gmail account with an app password).
+"""Email, sent one of two ways:
 
-Sender account (secrets, shared by all subscribers):
+    SMTP   locally and in GitHub Actions (e.g. a Gmail account with an app password)
+    SES    on AWS Lambda: Amazon Simple Email Service. The CDK stacks set LITFETCH_EMAIL_VIA=ses
+           and allow the Lambdas to send from identities verified in SES.
+
+SMTP sender account (secrets, shared by all subscribers):
     SMTP_HOST      smtp.gmail.com
     SMTP_PORT      587 (STARTTLS, default) or 465 (SSL)
     SMTP_USER      literaturebot99@gmail.com
     SMTP_PASSWORD  the 16-character app password (spaces are ignored)
     SMTP_FROM      optional, defaults to SMTP_USER
+SES sender (Parameter Store /litfetch/SES_FROM):
+    SES_FROM       an address (or an address at a domain) verified in SES, us-east-2
 Recipients, per subscriber under outputs.email:
     to: [a@umich.edu, b@umich.edu]      and/or
     to_env: EMAIL_TO_WANG_LAB           (a secret holding comma-separated addresses)
@@ -13,6 +19,7 @@ Recipients are Bcc'd, so they don't see each other's addresses.
 """
 import datetime as dt
 import html
+import os
 import smtplib
 import ssl
 import time
@@ -25,6 +32,13 @@ from digest.notify.format import (CONNECTIONS_TITLE, ZH_LABEL, connection_lines,
 
 NAME = "Email"
 SENDER_NAME = "Paper Digest"
+REQUIRED = {"smtp": ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"), "ses": ("SES_FROM",)}
+SES_BATCH = 50                       # SES takes at most 50 recipients per message
+
+
+def via():
+    """'ses' when LITFETCH_EMAIL_VIA=ses (set on the Lambdas by the CDK stacks), else 'smtp'."""
+    return "ses" if os.getenv("LITFETCH_EMAIL_VIA", "").strip().lower() == "ses" else "smtp"
 
 
 def destination(cfg):
@@ -36,12 +50,14 @@ def destination(cfg):
                       "put addresses under to: instead")
     if cfg.get("to_env"):
         to += [a.strip() for a in (env.get(cfg["to_env"]) or "").split(",") if a.strip()]
-    missing = [n for n in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD") if not env.get(n)]
+    missing = [n for n in REQUIRED[via()] if not env.get(n)]
     if not to:
         return None, "it has no recipients (outputs.email.to or to_env)"
     if missing:
         verb = "isn't" if len(missing) == 1 else "aren't"
-        return None, f"{', '.join(missing)} {verb} set (.env locally, GitHub secrets in Actions)"
+        where = ("Parameter Store /litfetch/" if via() == "ses"
+                 else ".env locally, GitHub secrets in Actions")
+        return None, f"{', '.join(missing)} {verb} set ({where})"
     return to, None
 
 
@@ -189,16 +205,57 @@ def _connect(host, port, ctx):
     return server
 
 
+def _address(msg, sender):
+    """From and To are the sender; the real recipients only go to the server (like Bcc), so
+    they don't see each other's addresses."""
+    for h in ("From", "To"):
+        del msg[h]
+    msg["From"] = formataddr((SENDER_NAME, sender))
+    msg["To"] = formataddr((SENDER_NAME, sender))
+
+
 def send(recipients, msg):
+    """Send the message to every recipient, through SES or SMTP (see via())."""
+    if via() == "ses":
+        return _send_ses(list(recipients), msg)
+    return _send_smtp(recipients, msg)
+
+
+def _ses_client():
+    import boto3
+    return boto3.client("sesv2", region_name=os.getenv("AWS_REGION", "us-east-2"))
+
+
+def _send_ses(recipients, msg):
+    """One SES SendEmail call per 50 recipients, with the message as built (raw MIME)."""
+    from botocore.exceptions import BotoCoreError, ClientError
+    sender = env.get("SES_FROM")
+    if not sender:
+        raise RuntimeError("SES_FROM isn't set (Parameter Store /litfetch/SES_FROM)")
+    _address(msg, sender)
+    raw = msg.as_bytes()
+    client = _ses_client()
+    for i in range(0, len(recipients), SES_BATCH):
+        try:
+            client.send_email(FromEmailAddress=sender,
+                              Destination={"ToAddresses": recipients[i:i + SES_BATCH]},
+                              Content={"Raw": {"Data": raw}})
+        except ClientError as e:
+            err = e.response.get("Error", {})
+            hint = (" (while SES is in its sandbox, every recipient must be a verified identity too)"
+                    if "not verified" in err.get("Message", "") else "")
+            raise RuntimeError(f"SES refused it: {err.get('Code')}: {err.get('Message')}{hint}") from e
+        except BotoCoreError as e:                         # e.g. no network or credentials
+            raise RuntimeError(f"couldn't reach SES ({e})") from e
+
+
+def _send_smtp(recipients, msg):
     """Send via SMTP_PORT; if the server can't be reached, retry and also try Gmail's other
     port (587 STARTTLS <-> 465 SSL), since some networks (VPNs, campus Wi-Fi) block one of them."""
     host, port = env.get("SMTP_HOST"), int(env.get("SMTP_PORT") or 587)
     user, password = env.get("SMTP_USER"), (env.get("SMTP_PASSWORD") or "").replace(" ", "")
     sender = env.get("SMTP_FROM") or user
-    for h in ("From", "To"):
-        del msg[h]
-    msg["From"] = formataddr((SENDER_NAME, sender))
-    msg["To"] = formataddr((SENDER_NAME, sender))        # real recipients go as Bcc
+    _address(msg, sender)
     ctx = ssl.create_default_context()
     ports = [port] + [p for p in (587, 465) if p != port and port in (587, 465)]
     attempts = [(p, wait) for wait in (0, 15) for p in ports]     # every port, then again after 15 s
