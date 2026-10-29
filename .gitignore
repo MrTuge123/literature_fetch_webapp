@@ -15,3 +15,7 @@ subscribers/*.yaml
 
 # local comparison output
 docs/baseline_*.txt
+
+# web app config (stack outputs)
+.env.local
+*.local
