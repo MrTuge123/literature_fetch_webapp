@@ -32,6 +32,17 @@ Options for the backend stack:
 | `LitFetchWeb` | Private S3 bucket (Block Public Access, HTTPS only) holding `web/dist`, read only by CloudFront distribution (Origin Access Control). HTTPS, security headers, price class 100, unknown paths → `index.html` (SPA routing). `assets/` cached a year, `index.html` never cached and invalidated on deploy. Outputs `WebUrl`. |
 | `LitFetchBackend` | `litfetch-weekly` schedule (Mon 7:00 New York, off until M9) → `litfetch-dispatch` Lambda → `litfetch-jobs.fifo` queue (failed twice → `litfetch-jobs-failed.fifo`) → `litfetch-worker` Lambda (one user at a time). `litfetch-alerts` SNS topic + 3 alarms (failed job, dispatch error, posting failed). |
 
+**Email (SES):** both Lambdas send email through Amazon SES (`litfetch_infra/ses.py`), from the
+address in Parameter Store `/litfetch/SES_FROM`, which must be verified in SES (us-east-2):
+
+```bash
+aws sesv2 create-email-identity --email-identity you@umich.edu --profile litfetch --region us-east-2
+python scripts/put_secrets.py --profile litfetch --set SES_FROM      # type the same address
+```
+
+While SES is in its sandbox, recipients must be verified too (200 emails a day). Locally and in
+GitHub Actions, email still goes over SMTP (`SMTP_*` in `.env`).
+
 Region is always `us-east-2` (see `app.py`). Both Lambdas share one zip, built without Docker:
 `litfetch_infra/bundling.py` runs `pip install --platform manylinux2014_aarch64` and copies
 `digest/`, `api/` and `config.yaml` (never `.env`, `seen/`, `history/` or `subscribers/`).

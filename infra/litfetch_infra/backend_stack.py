@@ -8,6 +8,7 @@
     litfetch-worker        Lambda (M3): Python 3.12 on arm64, 1 GB, 15 min, one subscriber per job.
                            Reads/writes only the LitFetch table, reads only /litfetch/* parameters.
     litfetch-alerts        SNS topic; emails you when a job fails, dispatch errors, or posting fails.
+Email digests go out through Amazon SES (litfetch_infra/ses.py).
 """
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack, TimeZone
 from aws_cdk import aws_cloudwatch as cloudwatch
@@ -24,6 +25,7 @@ from aws_cdk import aws_sns_subscriptions as sns_subscriptions
 from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
+from litfetch_infra import ses
 from litfetch_infra.data_stack import TABLE_NAME
 
 WORKER_NAME = "litfetch-worker"
@@ -89,6 +91,7 @@ class BackendStack(Stack):
             resources=["*"],
             conditions={"StringEquals": {"kms:ViaService": f"ssm.{self.region}.amazonaws.com"}},
         ))
+        ses.allow_sending(self.worker)                # email digests via SES
 
         # ---- Queue: one job per subscriber, handed to the worker one at a time ----
         self.failed_jobs = sqs.Queue(

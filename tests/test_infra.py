@@ -108,8 +108,16 @@ def test_permissions_are_only_the_table_and_its_parameters(backend):
     kms = [s for s in statements if s["Action"] == "kms:Decrypt"]
     assert kms[0]["Condition"] == {"StringEquals": {"kms:ViaService": "ssm.us-east-2.amazonaws.com"}}
     assert any("sqs:ReceiveMessage" in s["Action"] for s in statements)      # reads its job queue
+    assert_sends_email_via_ses(backend, "Worker", statements)
     assert not any(s["Action"] == "*" or s.get("Resource") == "*" and s["Action"] != "kms:Decrypt"
                    for s in statements)                    # no wildcard permissions besides the scoped KMS one
+
+
+def assert_sends_email_via_ses(template, function_prefix, statements):
+    ses = [s for s in statements if "ses:SendEmail" in s["Action"]]
+    assert ses and ses[0]["Resource"] == "arn:aws:ses:us-east-2:123456789012:identity/*"   # verified ones only
+    (fn,) = [r for k, r in template.find_resources("AWS::Lambda::Function").items() if k.startswith(function_prefix)]
+    assert fn["Properties"]["Environment"]["Variables"]["LITFETCH_EMAIL_VIA"] == "ses"
 
 
 def test_package_contains_only_code_not_secrets_or_data():
@@ -224,6 +232,7 @@ def test_api_function_permissions_are_scoped(api_template):
     webhook = [s for s in statements if "ssm:PutParameter" in s["Action"]]
     assert webhook and all("SLACK_WEBHOOK_*" in str(r) for r in [webhook[0]["Resource"]])
     assert any(s["Action"] == "cognito-idp:AdminDeleteUser" for s in statements)
+    assert_sends_email_via_ses(api_template, "ApiFn", statements)
     assert not any(s.get("Resource") == "*" and "kms:" not in str(s["Action"]) for s in statements)
     presignup = str(policy_of(api_template, "PreSignUpServiceRole")["Properties"]["PolicyDocument"])
     assert "dynamodb:UpdateItem" in presignup and "PutItem" not in presignup and "Scan" not in presignup
