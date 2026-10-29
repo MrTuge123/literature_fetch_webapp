@@ -120,3 +120,11 @@ def test_invites_are_single_use(ds):
 def test_expired_invites_are_refused(ds):
     code, = ds.create_invites(1, days=-1)
     assert ds.use_invite(code, "late@umich.edu") is False
+
+
+def test_set_paused_keeps_settings(ds):
+    ds.save_preferences(template_prefs("a_lab"))
+    assert ds.set_paused("a_lab") is True
+    assert ds.list_subscribers() == [] and ds.load_preferences("a_lab") is not None
+    assert ds.set_paused("a_lab", False) is True and ds.list_subscribers() == ["a_lab"]
+    assert ds.set_paused("nobody") is False

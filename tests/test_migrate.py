@@ -57,3 +57,14 @@ def test_running_twice_changes_nothing(files, dynamo_table):
 def test_only_one_subscriber(files, dynamo_table):
     assert migrate.main(["--only", "old"]) == 0
     assert {i["PK"] for i in dynamo_table.scan()["Items"]} == {"USER#old"}
+
+
+def test_switching_a_subscriber_off_in_the_files_pauses_it(files, dynamo_table):
+    from digest.dynamo_store import DynamoStore
+    assert migrate.main([]) == 0
+    shutil.copy(files / "subscribers" / "lab.yaml", files / "subscribers" / "lab2.yaml")
+    os.rename(files / "subscribers" / "lab.yaml", files / "subscribers" / "_lab.yaml")   # switched off
+    assert migrate.main([]) == 0
+    ds = DynamoStore()
+    assert ds.list_subscribers() == ["lab2"] and ds.profile("lab")["paused"] is True
+    assert ds.load_seen("lab") == {"10.1/a", "111"}                   # data kept

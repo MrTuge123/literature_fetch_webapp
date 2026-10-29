@@ -4,6 +4,9 @@
     seen/<id>.json          -> SEEN# items  (every subscriber with a file, active or not)
     history/<id>.jsonl      -> HIST# items
 
+A subscriber switched off in the files (subscribers/_<id>.yaml) is paused in DynamoDB if it has
+settings there, so the weekly round leaves it out too.
+
 Safe to run again: seen and history are merged (nothing duplicated, only changes written) and an
 existing PREFS item is kept unless --overwrite-prefs. Afterwards it reads everything back and
 fails if any count differs from the files.
@@ -27,6 +30,12 @@ def file_ids():
     stems = {os.path.splitext(os.path.basename(p))[0]
              for p in glob.glob(os.path.join(store.SEEN_DIR, "*.json")) + glob.glob(os.path.join(history.HISTORY_DIR, "*.jsonl"))}
     return sorted(s for s in stems if not s.startswith("."))
+
+
+def inactive_ids():
+    """Subscribers whose file is switched off: subscribers/_<id>.yaml (not _template)."""
+    return {os.path.basename(p)[1:-len(".yaml")] for p in glob.glob(os.path.join(config.SUBSCRIBERS_DIR, "_*.yaml"))
+            if os.path.basename(p) != "_template.yaml"}
 
 
 def from_files(sid):
@@ -82,6 +91,12 @@ def main(argv=None):
         if has_prefs and ds.load_preferences(sid) is None:
             problems.append(f"{sid}: PREFS missing")
         print("checked.")
+    for sid in sorted(inactive_ids()):                         # _<id>.yaml: switched off
+        if args.only and sid != args.only:
+            continue
+        if (ds.profile(sid) or {}).get("paused") is False and sid not in active:
+            ds.set_paused(sid, True)
+            print(f"\n{sid}: switched off in subscribers/_{sid}.yaml, so paused in DynamoDB")
     if problems:
         print("\nProblems:\n  " + "\n  ".join(problems))
         return 1

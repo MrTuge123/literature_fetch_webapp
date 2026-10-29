@@ -157,6 +157,19 @@ class DynamoStore:
             raise
         return True
 
+    def set_paused(self, sid, paused=True):
+        """Pause (or resume) a subscriber's weekly digest, keeping their settings.
+        Returns False if they have no PREFS item."""
+        try:
+            self.table.update_item(Key={"PK": _pk(sid), "SK": "PREFS"}, UpdateExpression="SET paused = :p",
+                                   ConditionExpression=Attr("PK").exists(),
+                                   ExpressionAttributeValues={":p": bool(paused)})
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+        return True
+
     def load_preferences(self, sid):
         """The subscriber's Preferences, or None if they have none."""
         item = self.table.get_item(Key={"PK": _pk(sid), "SK": "PREFS"}).get("Item")
