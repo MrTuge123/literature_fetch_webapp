@@ -77,3 +77,46 @@ def test_list_subscribers_and_missing_preferences(ds):
         ds.save_preferences(Preferences.model_validate({**merged("subscribers/_template.yaml"), "id": sid}))
     ds.add_seen("c_lab", {"x"})                               # seen only: not a subscriber
     assert ds.list_subscribers() == ["a_lab", "b_lab"]
+
+
+# ---- M5: accounts and invites ----
+
+def template_prefs(sid):
+    return Preferences.model_validate({**merged("subscribers/_template.yaml"), "id": sid})
+
+
+def test_paused_subscribers_are_left_out_of_the_round(ds):
+    ds.save_preferences(template_prefs("a_lab"))
+    ds.save_preferences(template_prefs("b_lab"), paused=True, email="b@umich.edu")
+    assert ds.list_subscribers() == ["a_lab"]
+    assert ds.list_subscribers(include_paused=True) == ["a_lab", "b_lab"]
+    assert ds.profile("b_lab")["paused"] is True and ds.profile("b_lab")["email"] == "b@umich.edu"
+    assert ds.profile("a_lab")["paused"] is False and ds.profile("nobody") is None
+
+
+def test_delete_user_removes_everything_of_theirs_only(ds, dynamo_table):
+    ds.save_preferences(template_prefs("a_lab"))
+    ds.add_seen("a_lab", {"x", "y"})
+    ds.save_history("a_lab", [A], posted=[A])
+    ds.add_seen("other", {"z"})
+    assert ds.delete_user("a_lab") == 4
+    assert [i["PK"] for i in dynamo_table.scan()["Items"]] == ["USER#other"]
+
+
+def test_daily_quota(ds):
+    assert [ds.take_quota("a", "test", 3) for _ in range(4)] == [True, True, True, False]
+    assert ds.take_quota("b", "test", 3) is True                     # per user
+
+
+def test_invites_are_single_use(ds):
+    code, = ds.create_invites(1, days=7, created_by="tiger", note="lab")
+    assert ds.use_invite(code.lower(), "new@umich.edu") is True      # case doesn't matter
+    assert ds.use_invite(code, "again@umich.edu") is False           # already used
+    assert ds.use_invite("NOPE1234", "x@umich.edu") is False and ds.use_invite("", "x") is False
+    (inv,) = ds.list_invites()
+    assert inv["code"] == code and inv["used_by"] == "new@umich.edu" and inv["note"] == "lab"
+
+
+def test_expired_invites_are_refused(ds):
+    code, = ds.create_invites(1, days=-1)
+    assert ds.use_invite(code, "late@umich.edu") is False

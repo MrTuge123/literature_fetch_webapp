@@ -6,11 +6,14 @@ Items (PK = USER#<subscriber id>):
     SK = PREFS               {"name", "settings": <Preferences.to_sub() minus id/file>, "updated_at"}
     SK = SEEN#<paper id>     {"sent_at", "ttl"}   one per ID (PMID, DOI, arxiv:..., title:...)
     SK = HIST#<paper id>     {"record": <digest.history.record>}   id = the record's smallest ID
+    SK = QUOTA#<what>#<day>  {"count", "ttl"}   per-user daily limits (e.g. test messages)
+Invites (PK = INVITE#<code>, SK = META): {"created_by", "note", "expires_at", "used_by", "used_at"}
 
 DynamoDB has no float type: numbers go in as Decimal and come back as int (7) or float (7.5)
 exactly as they went in (to_dynamo / from_dynamo)."""
 import datetime as dt
 import hashlib
+import secrets
 import json
 import os
 import time
@@ -68,8 +71,9 @@ class DynamoStore:
         self.table = session.resource("dynamodb", region_name=region, config=RETRIES).Table(name)
 
     def _query(self, sid, prefix):
-        """Every item of this subscriber whose SK starts with prefix (all pages)."""
-        kw = {"KeyConditionExpression": Key("PK").eq(_pk(sid)) & Key("SK").begins_with(prefix)}
+        """Every item of this subscriber whose SK starts with prefix ("" = all of them), all pages."""
+        cond = Key("PK").eq(_pk(sid))
+        kw = {"KeyConditionExpression": cond & Key("SK").begins_with(prefix) if prefix else cond}
         items = []
         while True:
             r = self.table.query(**kw)
@@ -133,11 +137,17 @@ class DynamoStore:
 
     # ---- preferences (the website and the scheduler use these) ----
 
-    def save_preferences(self, prefs: Preferences, overwrite=True):
-        """Store a subscriber's settings. overwrite=False keeps an existing item (returns False)."""
+    def save_preferences(self, prefs: Preferences, overwrite=True, paused=None, email=None):
+        """Store a subscriber's settings. overwrite=False keeps an existing item (returns False).
+        paused=True keeps the settings but leaves them out of the weekly round (list_subscribers).
+        email: the website account's address (shown to admins; scripts leave it out)."""
         settings = {k: v for k, v in prefs.to_sub().items() if k not in ("id", "file")}
         item = {"PK": _pk(prefs.id), "SK": "PREFS", "name": prefs.name, "settings": to_dynamo(settings),
                 "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}
+        if paused is not None:
+            item["paused"] = bool(paused)
+        if email:
+            item["email"] = email
         kw = {} if overwrite else {"ConditionExpression": Attr("PK").not_exists()}
         try:
             self.table.put_item(Item=item, **kw)
@@ -154,13 +164,97 @@ class DynamoStore:
             return None
         return Preferences.model_validate({**from_dynamo(item["settings"]), "id": sid})
 
-    def list_subscribers(self):
-        """Every subscriber id with a PREFS item (a Scan: fine for a lab, add an index past ~1,000 users)."""
-        kw = {"FilterExpression": Attr("SK").eq("PREFS"), "ProjectionExpression": "PK"}
+    def profile(self, sid):
+        """{"paused", "updated_at", "email"} of a subscriber's PREFS item, or None if they have none."""
+        item = self.table.get_item(Key={"PK": _pk(sid), "SK": "PREFS"},
+                                   ProjectionExpression="paused, updated_at, email").get("Item")
+        if item is None:
+            return None
+        return {"paused": bool(item.get("paused", False)), "updated_at": item.get("updated_at"),
+                "email": item.get("email")}
+
+    def list_subscribers(self, include_paused=False):
+        """Every subscriber id with a PREFS item, paused ones only if asked (a Scan: fine for a
+        lab, add an index past ~1,000 users)."""
+        flt = Attr("SK").eq("PREFS")
+        if not include_paused:
+            flt = flt & Attr("paused").ne(True)
+        kw = {"FilterExpression": flt, "ProjectionExpression": "PK"}
         ids = []
         while True:
             r = self.table.scan(**kw)
             ids += [i["PK"][len("USER#"):] for i in r["Items"]]
             if "LastEvaluatedKey" not in r:
                 return sorted(ids)
+            kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
+
+    # ---- accounts (the website) ----
+
+    def delete_user(self, sid):
+        """Delete every item of this subscriber (settings, seen papers, history). Returns how many."""
+        keys = [{"PK": i["PK"], "SK": i["SK"]} for i in self._query(sid, "")]
+        with self.table.batch_writer() as b:
+            for k in keys:
+                b.delete_item(Key=k)
+        return len(keys)
+
+    def take_quota(self, sid, what, limit):
+        """Count one use of `what` today; False (and nothing counted) once `limit` is reached."""
+        day = dt.datetime.now(dt.timezone.utc).date().isoformat()
+        try:
+            self.table.update_item(
+                Key={"PK": _pk(sid), "SK": f"QUOTA#{what}#{day}"},
+                UpdateExpression="ADD #c :one SET #t = :ttl",
+                ConditionExpression="attribute_not_exists(#c) OR #c < :limit",
+                ExpressionAttributeNames={"#c": "count", "#t": "ttl"},
+                ExpressionAttributeValues={":one": 1, ":limit": limit, ":ttl": int(time.time()) + 2 * 86400},
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+        return True
+
+    # ---- invites ----
+
+    def create_invites(self, count=1, days=14, created_by="admin", note=""):
+        """New single-use invite codes, valid for `days` days."""
+        expires = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=days)).isoformat(timespec="seconds")
+        codes = []
+        with self.table.batch_writer() as b:
+            for _ in range(count):
+                code = secrets.token_hex(4).upper()                       # e.g. 9F3A61C2
+                codes.append(code)
+                b.put_item(Item={"PK": f"INVITE#{code}", "SK": "META", "created_by": created_by,
+                                 "note": note, "expires_at": expires})
+        return codes
+
+    def use_invite(self, code, email):
+        """Mark an invite used by `email`. False if it doesn't exist, was used, or expired."""
+        if not code:
+            return False
+        now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        try:
+            self.table.update_item(
+                Key={"PK": f"INVITE#{code.strip().upper()}", "SK": "META"},
+                UpdateExpression="SET used_by = :e, used_at = :now",
+                ConditionExpression="attribute_exists(PK) AND attribute_not_exists(used_by) AND expires_at > :now",
+                ExpressionAttributeValues={":e": email, ":now": now},
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+        return True
+
+    def list_invites(self):
+        """Every invite (newest expiry first)."""
+        kw = {"FilterExpression": Attr("PK").begins_with("INVITE#")}
+        out = []
+        while True:
+            r = self.table.scan(**kw)
+            out += [{"code": i["PK"][len("INVITE#"):], **{k: i.get(k) for k in
+                     ("created_by", "note", "expires_at", "used_by", "used_at")}} for i in r["Items"]]
+            if "LastEvaluatedKey" not in r:
+                return sorted(out, key=lambda i: i["expires_at"] or "", reverse=True)
             kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
