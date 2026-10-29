@@ -9,6 +9,8 @@ cdk diff   --profile litfetch          # what a deploy would change
 cdk deploy --all --profile litfetch    # create / update every stack
 ```
 
+Or from the repo root, tests + website build + deploy in one go: `scripts/deploy.sh`.
+
 Deploy the website (build first: the stack copies `web/dist`):
 
 ```bash
@@ -20,8 +22,9 @@ Options for the backend stack:
 
 | How | What |
 | --- | --- |
-| `LITFETCH_ALERT_EMAIL=you@umich.edu cdk deploy ...` | alarm emails go there (AWS emails a confirmation link first) |
-| `cdk deploy -c schedule=on ...` | turn the Monday schedule on (M9 cut-over; it is off otherwise) |
+| `~/.cdk.json`: `{"context": {"alertEmail": "you@umich.edu"}}` | alarm emails go there (required; `LITFETCH_ALERT_EMAIL=...` also works, `none` for no emails) |
+| `cdk.json` → `"schedule": "on"/"off"` | the Monday schedule (committed, so every deploy keeps it) |
+| `cdk.json` → `"dryRun": "on"/"off"` | on = jobs only log what they'd send; off = really send (docs/CUTOVER.md) |
 | `cdk deploy -c localDev=off ...` | stop allowing the local dev server (`http://localhost:5173`) to call the API; the CloudFront site is always allowed |
 | `cdk deploy -c webOrigins=https://a.example ...` | extra sites allowed to call the API from a browser |
 

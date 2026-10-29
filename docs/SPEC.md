@@ -216,11 +216,12 @@ Start with M0 today: set up the AWS account safely, before writing any code. Eac
 - **Prompt:** "Add email delivery via SES to the worker and the Past digests page."
 - **Verify:** a test user with email-only delivery gets Monday's digest
 
-### M9 — Cut-over, monitoring and CI
+### M9 — Cut-over and monitoring (no CI)
 
-- **Learn:** CloudWatch alarms, GitHub Actions deploying to AWS through OIDC (no stored AWS keys)
-- **Prompt:** "Add CloudWatch alarms for DLQ messages and Lambda errors that email me. Add a GitHub Actions workflow that runs tests and `cdk deploy` on push to main using an OIDC role."
-- **Verify:** two Mondays of matching output from AWS and GitHub; then disable `.github/workflows/digest.yml` and invite the lab
+- **Decided:** no GitHub Actions. Deploys run from the laptop with `scripts/deploy.sh` (tests, build, `cdk deploy`).
+- **Do:** `infra/cdk.json` holds `schedule` and `dryRun`; the alarm email lives in `~/.cdk.json`. `scripts/sync_slack_post.sh` brings slack_post's latest settings, seen and history into DynamoDB.
+- **Phases** (docs/CUTOVER.md): A. schedule on + dry run for 1–2 Mondays next to slack_post; B. disable slack_post's workflow, sync, dry run off.
+- **Verify:** Monday's logs show every subscriber's digest with no errors; after B, the lab gets the digest from AWS and nothing twice
 
 ## Open questions
 
