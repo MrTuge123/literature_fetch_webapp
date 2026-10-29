@@ -11,6 +11,7 @@ import aws_cdk as cdk
 from litfetch_infra.api_stack import ApiStack
 from litfetch_infra.backend_stack import BackendStack
 from litfetch_infra.data_stack import DataStack
+from litfetch_infra.web_stack import WebStack
 
 REGION = "us-east-2"
 
@@ -26,9 +27,18 @@ BackendStack(app, "LitFetchBackend", env=env,
              alert_email=os.getenv("LITFETCH_ALERT_EMAIL"),
              description="Literature Fetch: weekly schedule, dispatch, jobs queue, worker, alerts")
 
-# cdk deploy -c webOrigins=https://a.example,http://localhost:5173   sites allowed to call the API
-ApiStack(app, "LitFetchApi", env=env,
-         web_origins=(app.node.try_get_context("webOrigins") or "http://localhost:5173").split(","),
+# Build the site first (cd web && npm run build): this copies web/dist to S3 behind CloudFront.
+web = WebStack(app, "LitFetchWeb", env=env,
+               description="Literature Fetch: the website (private S3 bucket behind CloudFront)")
+
+# Browsers may call the API only from the CloudFront site, plus the local dev server unless
+#   cdk deploy -c localDev=off ...
+# and any extra sites in  -c webOrigins=https://a.example,https://b.example
+origins = [web.url]
+if app.node.try_get_context("localDev") != "off":
+    origins.append("http://localhost:5173")
+origins += [o for o in (app.node.try_get_context("webOrigins") or "").split(",") if o]
+ApiStack(app, "LitFetchApi", env=env, web_origins=origins,
          description="Literature Fetch: sign-in (Cognito) and the website's API")
 
 cdk.Tags.of(app).add("project", "literature-fetch")       # every resource, so costs can be filtered

@@ -21,7 +21,17 @@ that port.
 | --- | --- |
 | `npm run dev` | Dev server with hot reload |
 | `npm test` | Unit tests (Vitest) for the settings form |
-| `npm run build` | Type-check, then build static files into `dist/` (deployed in M7) |
+| `npm run build` | Type-check, then build static files into `dist/` |
+
+## Put it online
+
+```bash
+npm run build
+cd ../infra && cdk deploy LitFetchWeb LitFetchApi --profile litfetch
+```
+
+The site is at the `LitFetchWeb.WebUrl` output (`https://<id>.cloudfront.net`). Rebuild and redeploy
+after every change.
 
 ## Files
 

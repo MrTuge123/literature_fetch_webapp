@@ -133,8 +133,8 @@ The weekly run becomes one small job per user, because a Lambda stops after 15 m
 - [ ] No secrets in code or in the frontend bundle; `.env` stays in `.gitignore`
 - [ ] User id comes only from the login token; every DynamoDB key is built from it
 - [ ] Webhook URLs are write-only in the UI and never returned by the API
-- [ ] S3 bucket private, readable only through CloudFront (Origin Access Control)
-- [ ] CORS on the API allows only the CloudFront domain
+- [x] S3 bucket private, readable only through CloudFront (Origin Access Control)
+- [x] CORS on the API allows only the CloudFront domain (plus localhost:5173 until `-c localDev=off`)
 - [ ] API throttling: 10 requests per second per route
 
 **Cost**
