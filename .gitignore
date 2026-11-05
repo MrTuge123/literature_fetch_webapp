@@ -19,3 +19,4 @@ docs/baseline_*.txt
 # web app config (stack outputs)
 .env.local
 *.local
+out.json
