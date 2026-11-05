@@ -67,3 +67,14 @@ def test_a_secret_added_later_is_found_after_a_minute(ssm, monkeypatch):
     assert s.get("NEW") is None                               # just loaded: not asked again yet
     monkeypatch.setattr(s, "_loaded_at", s._loaded_at - 61)
     assert s.get("NEW") == "new"
+
+
+def test_a_changed_secret_is_read_again_after_five_minutes(ssm, monkeypatch):
+    client, put = ssm
+    put("/litfetch/SES_FROM", "old@example.edu")
+    s = ParameterStoreSecrets()
+    assert s.get("SES_FROM") == "old@example.edu"
+    client.put_parameter(Name="/litfetch/SES_FROM", Value="new@example.edu", Type="SecureString", Overwrite=True)
+    assert s.get("SES_FROM") == "old@example.edu"             # still within MAX_AGE: from memory
+    monkeypatch.setattr(s, "_loaded_at", s._loaded_at - 301)
+    assert s.get("SES_FROM") == "new@example.edu"

@@ -3,7 +3,8 @@
 Every secret is a SecureString named <prefix><NAME>, e.g. /litfetch/GROQ_API_KEY or
 /litfetch/SLACK_WEBHOOK_URL: the same NAMEs as in .env (scripts/put_secrets.py copies them).
 All of them are fetched in one paginated call the first time one is needed, then kept in
-memory, so a warm Lambda doesn't call Parameter Store again. Plug in with digest.env.use().
+memory for up to MAX_AGE, so a warm Lambda calls Parameter Store at most every few minutes and
+a changed value (e.g. a new SES_FROM) is picked up within that time. Plug in with digest.env.use().
 """
 import os
 import time
@@ -23,6 +24,7 @@ class ParameterStoreSecrets:
         self._loaded_at = 0.0
 
     REFRESH_AFTER = 60          # seconds: a name missing from an older load is looked up again
+    MAX_AGE = 300               # seconds: after this, every value is read again (changed secrets)
 
     def _load(self):
         values, kw = {}, {"Path": self.prefix, "Recursive": False, "WithDecryption": True}
@@ -40,9 +42,10 @@ class ParameterStoreSecrets:
     def get(self, name):
         if not name:
             return None
-        if self._values is None:
-            self._reload()
-        if name not in self._values and time.monotonic() - self._loaded_at > self.REFRESH_AFTER:
+        age = time.monotonic() - self._loaded_at
+        if self._values is None or age > self.MAX_AGE:
+            self._reload()          # first use, or a value may have changed since
+        elif name not in self._values and age > self.REFRESH_AFTER:
             self._reload()          # e.g. a webhook a user saved after this Lambda started
         return self._values.get(name)
 
