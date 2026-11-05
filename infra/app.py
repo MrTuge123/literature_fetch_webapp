@@ -23,6 +23,7 @@ DataStack(app, "LitFetchData", env=env,
 # The weekly run is set in cdk.json (committed, so every deploy keeps it):
 #   "schedule": "on" | "off"     whether litfetch-weekly runs on Mondays
 #   "dryRun":   "on" | "off"     on = jobs only log what they'd send; off = really send (M9 cut-over)
+#   "email":    "ses" | "smtp"   how digests and test messages are emailed (litfetch_infra/ses.py)
 # Who gets alarm emails is personal, so it stays out of the repo: put it in ~/.cdk.json as
 #   {"context": {"alertEmail": "you@umich.edu"}}     (or set LITFETCH_ALERT_EMAIL).
 # Without it, deploying would unsubscribe the alarm emails, so it's required (unless "none").
@@ -33,6 +34,10 @@ def flag(name, default):
     return value == "on"
 
 
+email_via = str(app.node.try_get_context("email") or "ses").lower()
+if email_via not in ("ses", "smtp"):
+    raise SystemExit(f'cdk.json context "email" must be "ses" or "smtp", not {email_via!r}')
+
 alert_email = app.node.try_get_context("alertEmail") or os.getenv("LITFETCH_ALERT_EMAIL")
 if not alert_email:
     raise SystemExit('Set the alarm email first: ~/.cdk.json {"context": {"alertEmail": "you@umich.edu"}} '
@@ -40,6 +45,7 @@ if not alert_email:
 BackendStack(app, "LitFetchBackend", env=env,
              schedule_enabled=flag("schedule", "off"),
              dry_run_default=flag("dryRun", "on"),
+             email_via=email_via,
              alert_email=None if alert_email == "none" else alert_email,
              description="Literature Fetch: weekly schedule, dispatch, jobs queue, worker, alerts")
 
@@ -54,7 +60,7 @@ origins = [web.url]
 if app.node.try_get_context("localDev") != "off":
     origins.append("http://localhost:5173")
 origins += [o for o in (app.node.try_get_context("webOrigins") or "").split(",") if o]
-ApiStack(app, "LitFetchApi", env=env, web_origins=origins,
+ApiStack(app, "LitFetchApi", env=env, web_origins=origins, email_via=email_via,
          description="Literature Fetch: sign-in (Cognito) and the website's API")
 
 cdk.Tags.of(app).add("project", "literature-fetch")       # every resource, so costs can be filtered

@@ -8,7 +8,7 @@
                          API Gateway checks it before the Lambda runs. 10 requests/s, bursts of 20.
     litfetch-api-fn      Lambda behind every route (api/http.py).
     litfetch-presignup   Lambda Cognito calls before a sign-up (api/presignup.py).
-The API Lambda may send email through SES (test messages; litfetch_infra/ses.py).
+The API Lambda may send email (test messages) through SES or SMTP (litfetch_infra/ses.py).
 """
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_apigatewayv2 as apigw
@@ -47,7 +47,7 @@ LOGIN_ROUTES = {
 
 class ApiStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *, code: lambda_.Code | None = None,
-                 web_origins=("http://localhost:5173",), **kwargs) -> None:
+                 web_origins=("http://localhost:5173",), email_via: str = "ses", **kwargs) -> None:
         """code: the Lambda zip (default: bundling.py; tests pass a stub).
         web_origins: sites allowed to call the API from a browser (CORS): the local dev server now,
         the real site's URL from M7."""
@@ -124,7 +124,7 @@ class ApiStack(Stack):
             conditions={"StringEquals": {"kms:ViaService": f"ssm.{self.region}.amazonaws.com"}}))
         self.api_fn.add_to_role_policy(iam.PolicyStatement(      # DELETE /me removes the login too
             actions=["cognito-idp:AdminDeleteUser"], resources=[self.pool.user_pool_arn]))
-        ses.allow_sending(self.api_fn)                # "Send test" by email, via SES
+        ses.allow_sending(self.api_fn, email_via)     # "Send test" by email
 
         # ---- HTTP API ----
         self.api = apigw.HttpApi(

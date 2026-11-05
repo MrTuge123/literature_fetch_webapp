@@ -12,6 +12,7 @@
   },
   "context": {
     "schedule": "on",
-    "dryRun": "on"
+    "dryRun": "on",
+    "email": "smtp"
   }
 }

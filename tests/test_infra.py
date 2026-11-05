@@ -173,6 +173,7 @@ def test_cdk_json_keeps_the_weekly_settings():
     import json
     context = json.load(open(os.path.join("infra", "cdk.json")))["context"]
     assert context["schedule"] in ("on", "off") and context["dryRun"] in ("on", "off")
+    assert context.get("email", "ses") in ("ses", "smtp")
     assert "alertEmail" not in context                     # personal: ~/.cdk.json, not the repo
 
 
@@ -340,3 +341,10 @@ def test_api_cors_allows_the_cloudfront_site(built_site):
     (cors_api,) = Template.from_stack(api).find_resources("AWS::ApiGatewayV2::Api").values()
     origins = cors_api["Properties"]["CorsConfiguration"]["AllowOrigins"]
     assert "http://localhost:5173" in origins and "Fn::ImportValue" in str(origins[0])
+
+
+def test_smtp_email_needs_no_ses_permission():
+    t = make_backend(email_via="smtp")
+    statements = policy_of(t, "WorkerServiceRole")["Properties"]["PolicyDocument"]["Statement"]
+    assert not any("ses:SendEmail" in s["Action"] for s in statements)
+    assert worker_env(t)["LITFETCH_EMAIL_VIA"] == "smtp"

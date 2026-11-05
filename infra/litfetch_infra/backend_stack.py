@@ -8,7 +8,7 @@
     litfetch-worker        Lambda (M3): Python 3.12 on arm64, 1 GB, 15 min, one subscriber per job.
                            Reads/writes only the LitFetch table, reads only /litfetch/* parameters.
     litfetch-alerts        SNS topic; emails you when a job fails, dispatch errors, or posting fails.
-Email digests go out through Amazon SES (litfetch_infra/ses.py).
+Email digests go out through SES or SMTP (litfetch_infra/ses.py, cdk.json "email").
 """
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack, TimeZone
 from aws_cdk import aws_cloudwatch as cloudwatch
@@ -40,12 +40,13 @@ MAX_TRIES = 2                       # a job that fails twice goes to the failed-
 
 class BackendStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *, code: lambda_.Code | None = None,
-                 schedule_enabled: bool = False, dry_run_default: bool = True,
+                 schedule_enabled: bool = False, dry_run_default: bool = True, email_via: str = "ses",
                  alert_email: str | None = None, **kwargs) -> None:
         """code: the Lambda zip (default: built by bundling.py; tests pass a stub).
         schedule_enabled: whether the weekly schedule runs.
         dry_run_default: jobs only log what they would send (and save nothing) unless the job
             says otherwise. True until the M9 cut-over, while slack_post still sends the digest.
+        email_via: how digests are emailed, "ses" or "smtp" (litfetch_infra/ses.py).
         alert_email: who gets alarm emails (AWS sends a confirmation link first)."""
         super().__init__(scope, construct_id, **kwargs)
 
@@ -94,7 +95,7 @@ class BackendStack(Stack):
             resources=["*"],
             conditions={"StringEquals": {"kms:ViaService": f"ssm.{self.region}.amazonaws.com"}},
         ))
-        ses.allow_sending(self.worker)                # email digests via SES
+        ses.allow_sending(self.worker, email_via)     # email digests via SES or SMTP
 
         # ---- Queue: one job per subscriber, handed to the worker one at a time ----
         self.failed_jobs = sqs.Queue(

@@ -24,6 +24,7 @@ Options for the backend stack:
 | --- | --- |
 | `~/.cdk.json`: `{"context": {"alertEmail": "you@umich.edu"}}` | alarm emails go there (required; `LITFETCH_ALERT_EMAIL=...` also works, `none` for no emails) |
 | `cdk.json` → `"schedule": "on"/"off"` | the Monday schedule (committed, so every deploy keeps it) |
+| `cdk.json` → `"email": "smtp"/"ses"` | how email is sent: the Gmail account's SMTP login (`SMTP_*` in Parameter Store), or SES (`SES_FROM`) |
 | `cdk.json` → `"dryRun": "on"/"off"` | on = jobs only log what they'd send; off = really send (docs/CUTOVER.md) |
 | `cdk deploy -c localDev=off ...` | stop allowing the local dev server (`http://localhost:5173`) to call the API; the CloudFront site is always allowed |
 | `cdk deploy -c webOrigins=https://a.example ...` | extra sites allowed to call the API from a browser |

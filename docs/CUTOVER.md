@@ -44,8 +44,10 @@ aws logs tail /aws/lambda/litfetch-worker --since 6h --profile litfetch --region
 
 ## Before phase B
 
-- [ ] **SES production access** (SES console, us-east-2 → Account dashboard → Request production
-      access). Until then email only reaches verified addresses. Not needed if everyone uses Slack.
+- [ ] **Email sender works:** with `"email": "smtp"` in `infra/cdk.json` (the default now), the
+      Gmail login `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` must be in Parameter Store;
+      "Send test" on the website should land in the inbox. (With `"email": "ses"` you'd need SES
+      production access instead: SES console → Account dashboard → Request production access.)
 - [ ] **Real recipients:** `python scripts/put_secrets.py --dry-run` lists the secret names the
       subscribers use; set each real value with `python scripts/put_secrets.py --profile litfetch --set EMAIL_TO_WANG_LAB` (etc.).
 
