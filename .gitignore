@@ -20,3 +20,6 @@ docs/baseline_*.txt
 .env.local
 *.local
 out.json
+
+CLAUDE.md
+.claude
