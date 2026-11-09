@@ -8,7 +8,7 @@ import {
   signUp,
 } from "aws-amplify/auth";
 import { useState, type FormEvent } from "react";
-import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "../auth";
 import { Alert, Loading } from "../components/ui";
 import { PASSWORD_RULE, passwordProblem } from "../password";
@@ -193,6 +193,9 @@ export default function Login() {
             {passwordField("Password", "new-password", PASSWORD_RULE)}
             {submit("Sign up")}
             <p className="text-sm">Already have an account? {link("Sign in", "signIn")}</p>
+            <p className="text-sm">
+              No invite code? <Link to="/request-invite" className="text-indigo-700 hover:underline">Request one</Link>
+            </p>
           </form>
         )}
 

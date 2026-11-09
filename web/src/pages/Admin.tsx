@@ -1,6 +1,6 @@
 // Invite codes (admins only; the API checks the token's cognito:groups too).
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, errorText, type Invite } from "../api";
+import { api, errorText, type ApproveResult, type Invite, type InviteRequest } from "../api";
 import { Alert, Loading, Section } from "../components/ui";
 
 const signUpLink = (code: string) => `${window.location.origin}/login?invite=${code}`;
@@ -47,6 +47,8 @@ export default function Admin() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Admin</h1>
       {error && <Alert>{error}</Alert>}
+
+      <InviteRequests onApproved={load} />
 
       <Section title="New invite codes" hint="Each code allows one sign-up.">
         <form onSubmit={create} className="flex flex-wrap items-end gap-3">
@@ -107,5 +109,91 @@ export default function Admin() {
         )}
       </Section>
     </div>
+  );
+}
+
+// People who asked for an invite on /request-invite. Approve makes a code and emails them the link.
+function InviteRequests({ onApproved }: { onApproved: () => void }) {
+  const [requests, setRequests] = useState<InviteRequest[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ email: string; r: ApproveResult } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    api<{ requests: InviteRequest[] }>("GET", "/admin/invite-requests")
+      .then((r) => setRequests(r.requests))
+      .catch((e) => setError(errorText(e)));
+  }, []);
+  useEffect(load, [load]);
+
+  async function decide(email: string, approve: boolean) {
+    setBusy(email);
+    setError(null);
+    setResult(null);
+    try {
+      if (approve) {
+        const r = await api<ApproveResult>("POST", "/admin/invite-requests/approve", { email, days: 14 });
+        setResult({ email, r });
+        onApproved();
+      } else {
+        await api("POST", "/admin/invite-requests/reject", { email });
+      }
+      load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const pending = requests?.filter((r) => r.status === "pending").length ?? 0;
+  return (
+    <Section title={`Invite requests${pending ? ` (${pending} waiting)` : ""}`}
+      hint="Approve makes a 14-day code and emails the person their sign-up link.">
+      {error && <Alert>{error}</Alert>}
+      {result && (
+        <Alert kind={result.r.emailed ? "success" : "error"}>
+          {result.r.emailed
+            ? `Approved: emailed ${result.email} their sign-up link.`
+            : `Approved, but the email failed (${result.r.email_error}). Send them this link yourself: ${result.r.link ?? result.r.code}`}
+        </Alert>
+      )}
+      {!requests ? (
+        <Loading />
+      ) : !requests.length ? (
+        <p className="text-sm text-slate-500">No requests yet. People can ask at /request-invite.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs uppercase text-slate-500">
+              <tr><th className="py-2 pr-4">Who</th><th className="pr-4">Note</th><th className="pr-4">Asked</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {requests.map((r) => (
+                <tr key={r.email} className="border-t border-slate-100 align-top">
+                  <td className="py-2 pr-4"><div className="font-medium">{r.name}</div><div className="text-slate-500">{r.email}</div></td>
+                  <td className="py-2 pr-4 text-slate-600">{r.note}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{new Date(r.requested_at).toLocaleDateString()}</td>
+                  <td className="py-2">
+                    {r.status === "pending" ? (
+                      <div className="flex gap-2">
+                        <button className="btn btn-primary py-1" disabled={busy !== null} onClick={() => decide(r.email, true)}>
+                          {busy === r.email ? "…" : "Approve"}
+                        </button>
+                        <button className="btn py-1" disabled={busy !== null} onClick={() => decide(r.email, false)}>Reject</button>
+                      </div>
+                    ) : (
+                      <span className={r.status === "approved" ? "text-green-700" : "text-slate-400"}>
+                        {r.status}{r.code ? ` (${r.code})` : ""}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
   );
 }

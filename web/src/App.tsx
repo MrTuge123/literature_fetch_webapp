@@ -8,6 +8,7 @@ import Admin from "./pages/Admin";
 import Digests from "./pages/Digests";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import RequestInvite from "./pages/RequestInvite";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/request-invite" element={<RequestInvite />} />
             <Route element={<RequireAuth />}>
               <Route path="/settings" element={<Settings />} />
               <Route path="/digests" element={<Digests />} />

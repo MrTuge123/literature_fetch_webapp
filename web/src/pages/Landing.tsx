@@ -19,6 +19,7 @@ export default function Landing() {
             <>
               <Link to="/login" className="btn btn-primary">Sign in</Link>
               <Link to="/login?mode=signUp" className="btn">Sign up with an invite code</Link>
+              <Link to="/request-invite" className="btn">Request an invite</Link>
             </>
           )}
         </div>
@@ -35,7 +36,9 @@ export default function Landing() {
           </div>
         ))}
       </section>
-      <p className="text-xs text-slate-500">Invite only: ask the lab admin for a code.</p>
+      <p className="text-xs text-slate-500">
+        Invite only. No code yet? <Link to="/request-invite" className="underline">Request an invite</Link>.
+      </p>
     </div>
   );
 }

@@ -44,4 +44,4 @@ after every change.
 | `src/settings.ts` | The settings form's Zod schema and conversion to the API's format |
 | `src/password.ts` | The pool's password rule |
 | `src/components/` | Layout (header, nav), route guards, tag input, small UI pieces |
-| `src/pages/` | Landing, Login, Settings, Digests, Account, Admin |
+| `src/pages/` | Landing, Login, RequestInvite, Settings, Digests, Account, Admin |

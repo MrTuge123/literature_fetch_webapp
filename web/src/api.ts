@@ -89,3 +89,16 @@ export type Invite = {
   used_by: string | null;
   used_at: string | null;
 };
+
+export type InviteRequest = {
+  email: string;
+  name: string;
+  note: string | null;
+  status: "pending" | "approved" | "rejected";
+  requested_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  code: string | null;
+};
+
+export type ApproveResult = { code: string; link: string | null; emailed: boolean; email_error: string | null };
