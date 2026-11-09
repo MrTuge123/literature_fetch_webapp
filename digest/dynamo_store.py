@@ -8,6 +8,8 @@ Items (PK = USER#<subscriber id>):
     SK = HIST#<paper id>     {"record": <digest.history.record>}   id = the record's smallest ID
     SK = QUOTA#<what>#<day>  {"count", "ttl"}   per-user daily limits (e.g. test messages)
 Invites (PK = INVITE#<code>, SK = META): {"created_by", "note", "expires_at", "used_by", "used_at"}
+Invite requests (PK = INVREQ#<email>, SK = META): {"email", "name", "note", "status", "requested_at",
+    "decided_by", "decided_at", "code", "ttl"}   status: pending | approved | rejected; gone after 180 days
 
 DynamoDB has no float type: numbers go in as Decimal and come back as int (7) or float (7.5)
 exactly as they went in (to_dynamo / from_dynamo)."""
@@ -271,3 +273,66 @@ class DynamoStore:
             if "LastEvaluatedKey" not in r:
                 return sorted(out, key=lambda i: i["expires_at"] or "", reverse=True)
             kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
+
+    # ---- invite requests (people asking for a code on the website) ----
+
+    REQUEST_DAYS = 180              # a request (whatever its status) is deleted this long after it's made
+
+    def request_invite(self, email, name, note=""):
+        """Record that `email` asks for an invite. One pending request per address: returns False
+        (and changes nothing) if one is already waiting. A decided request can be made again."""
+        now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        try:
+            self.table.put_item(
+                Item={"PK": f"INVREQ#{email}", "SK": "META", "email": email, "name": name, "note": note,
+                      "status": "pending", "requested_at": now,
+                      "ttl": int(time.time()) + self.REQUEST_DAYS * 86400},
+                ConditionExpression="attribute_not_exists(PK) OR #s <> :pending",
+                ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":pending": "pending"})
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+        return True
+
+    def get_invite_request(self, email):
+        item = self.table.get_item(Key={"PK": f"INVREQ#{email}", "SK": "META"}).get("Item")
+        return _request(item) if item else None
+
+    def decide_invite_request(self, email, status, decided_by, code=None):
+        """Mark a pending request approved or rejected. Returns the updated request, or None if
+        there is no pending request for this address (so it can't be decided twice)."""
+        now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        values = {":st": status, ":by": decided_by, ":now": now, ":pending": "pending"}
+        update = "SET #s = :st, decided_by = :by, decided_at = :now"
+        if code:
+            update += ", code = :code"
+            values[":code"] = code
+        try:
+            r = self.table.update_item(
+                Key={"PK": f"INVREQ#{email}", "SK": "META"}, UpdateExpression=update,
+                ConditionExpression="#s = :pending", ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues=values, ReturnValues="ALL_NEW")
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return None
+            raise
+        return _request(r["Attributes"])
+
+    def list_invite_requests(self):
+        """Every request: pending ones first, then newest first."""
+        kw = {"FilterExpression": Attr("PK").begins_with("INVREQ#")}
+        out = []
+        while True:
+            r = self.table.scan(**kw)
+            out += [_request(i) for i in r["Items"]]
+            if "LastEvaluatedKey" not in r:
+                break
+            kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
+        out.sort(key=lambda i: i["requested_at"] or "", reverse=True)
+        return sorted(out, key=lambda i: i["status"] != "pending")
+
+
+def _request(item):
+    return {k: item.get(k) for k in ("email", "name", "note", "status", "requested_at",
+                                     "decided_by", "decided_at", "code")}

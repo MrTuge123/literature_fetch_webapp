@@ -15,6 +15,10 @@ ever read or change that user's own items.
     DELETE /me                     delete their account and everything stored for it
     GET    /admin/invites          list invite codes                       admins only
     POST   /admin/invites          make invite codes {"count", "days", "note"}
+    POST   /invite-requests        ask for an invite {"name", "email", "note"}  no login; emails the bot
+    GET    /admin/invite-requests  list requests, pending first             admins only
+    POST   /admin/invite-requests/approve  {"email", "days"}: make a code, email them the sign-up link
+    POST   /admin/invite-requests/reject   {"email"}
 
 Errors: {"error": "<code>", "message": "..."} with 400 / 401 / 403 / 404 / 405 / 429 / 500.
 """
@@ -33,6 +37,9 @@ from digest import env
 SSM_PREFIX = os.getenv("LITFETCH_SSM_PREFIX", "/litfetch/")
 WEBHOOK_RE = re.compile(r"^https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{10,200}$")
 TEST_MESSAGES_PER_DAY = 3
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[A-Za-z]{2,}$")
+REQUESTS_PER_DAY = 20            # invite requests from everyone together, per day
+REQUESTS_PER_IP = 3              # ... and from one IP address, per day
 MAX_BODY = 64 * 1024
 ROUTES = {}
 
@@ -270,6 +277,113 @@ def make_invites(user, event):
     codes = store.create_invites(count, days, created_by=user.email or user.id,
                                  note=str(body.get("note", ""))[:200])
     return {"codes": codes, "days": days}
+
+
+# ---------- invite requests ----------
+
+def _site():
+    """The website's address, for sign-up links (set by the API stack)."""
+    return os.getenv("LITFETCH_SITE_URL", "").rstrip("/")
+
+
+def _bot_address():
+    """The address digests are sent from: where invite requests are reported."""
+    from digest.notify import mail
+    if mail.via() == "ses":
+        return env.get("SES_FROM")
+    return env.get("SMTP_FROM") or env.get("SMTP_USER")
+
+
+def _send_email(to, subject, text):
+    from digest.notify import mail
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg.set_content(text)
+    mail.send([to], msg)
+
+
+def _request_email(body):
+    email = str(body.get("email") or "").strip().lower()
+    if len(email) > 254 or not EMAIL_RE.match(email):
+        raise HttpError(400, "invalid", "enter a valid email address")
+    return email
+
+
+@route("POST", "/invite-requests", login=False)
+def request_invite(user, event):
+    """Anyone can ask for an invite. The answer is the same whether or not they asked before,
+    so the form can't be used to find out who has. The request is emailed to the bot's address
+    (or ADMIN_EMAIL if that secret is set); an admin approves it on the Admin page."""
+    store, _, _ = _deps()
+    body = _body(event)
+    if str(body.get("website") or "").strip():          # a field people never see; bots fill it in
+        return {"ok": True}
+    name, note = str(body.get("name") or "").strip(), str(body.get("note") or "").strip()
+    email = _request_email(body)
+    if not 1 <= len(name) <= 80:
+        raise HttpError(400, "invalid", "enter your name (at most 80 characters)")
+    if len(note) > 500:
+        raise HttpError(400, "invalid", "the note can be at most 500 characters")
+    ip = ((event.get("requestContext") or {}).get("http") or {}).get("sourceIp") or "unknown"
+    if not (store.take_quota("_public", f"invite-request-ip-{ip}", REQUESTS_PER_IP)
+            and store.take_quota("_public", "invite-request", REQUESTS_PER_DAY)):
+        raise HttpError(429, "too_many", "too many requests today; please try again tomorrow")
+    if store.request_invite(email, name, note):
+        to = env.get("ADMIN_EMAIL") or _bot_address()
+        site = _site()
+        text = (f"{name} <{email}> asked for a Literature Fetch invite.\n\n"
+                f"Note: {note or '(none)'}\n\n"
+                f"Approve or reject it on the Admin page: {site + '/admin' if site else 'the website /admin'}\n")
+        try:
+            if to:
+                _send_email(to, f"Invite request: {name} <{email}>", text)
+        except Exception as e:                            # the request is saved either way
+            print(f"Warning: couldn't email the invite request ({e})")
+    return {"ok": True}
+
+
+@route("GET", "/admin/invite-requests", admin=True)
+def list_invite_requests(user, event):
+    store, _, _ = _deps()
+    return {"requests": store.list_invite_requests()}
+
+
+@route("POST", "/admin/invite-requests/approve", admin=True)
+def approve_invite_request(user, event):
+    """Make a code, mark the request approved and email the person their sign-up link."""
+    store, _, _ = _deps()
+    body = _body(event)
+    email, days = _request_email(body), int(body.get("days", 14))
+    if not 1 <= days <= 60:
+        raise HttpError(400, "invalid", "days must be 1-60")
+    req = store.get_invite_request(email)
+    if not req or req["status"] != "pending":
+        raise HttpError(409, "not_pending", "no pending request from that address")
+    (code,) = store.create_invites(1, days, created_by=user.email or user.id, note=f"request: {req['name']}")
+    req = store.decide_invite_request(email, "approved", user.email or user.id, code)
+    if req is None:                                       # decided by someone else just now
+        raise HttpError(409, "not_pending", "that request was just decided")
+    link = f"{_site()}/login?invite={code}" if _site() else None
+    text = (f"Hi {req['name']},\n\nYour request to join Literature Fetch was approved.\n\n"
+            + (f"Sign up here (your invite code is filled in): {link}\n\n" if link else "")
+            + f"Invite code: {code} (one sign-up, valid {days} days)\n\n"
+            "After signing up, describe your research topic on the Settings page and click Save "
+            "to start getting a weekly digest of new papers.\n")
+    try:
+        _send_email(email, "Your Literature Fetch invite", text)
+        emailed, problem = True, None
+    except Exception as e:
+        emailed, problem = False, str(e)[:200]
+    return {"code": code, "link": link, "emailed": emailed, "email_error": problem}
+
+
+@route("POST", "/admin/invite-requests/reject", admin=True)
+def reject_invite_request(user, event):
+    store, _, _ = _deps()
+    email = _request_email(_body(event))
+    if store.decide_invite_request(email, "rejected", user.email or user.id) is None:
+        raise HttpError(409, "not_pending", "no pending request from that address")
+    return {"status": "rejected"}
 
 
 # ---------- entry point ----------

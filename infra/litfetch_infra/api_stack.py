@@ -33,7 +33,7 @@ CLIENT_NAME = "litfetch-web"
 ADMIN_GROUP = "admins"
 M = apigw.HttpMethod
 # Must match api/http.py ROUTES (tests/test_infra.py checks it).
-PUBLIC_ROUTES = {"/health": [M.GET]}
+PUBLIC_ROUTES = {"/health": [M.GET], "/invite-requests": [M.POST]}
 LOGIN_ROUTES = {
     "/me": [M.GET, M.DELETE],
     "/me/preferences": [M.PUT],
@@ -42,12 +42,16 @@ LOGIN_ROUTES = {
     "/me/test-delivery": [M.POST],
     "/me/digests": [M.GET],
     "/admin/invites": [M.GET, M.POST],
+    "/admin/invite-requests": [M.GET],
+    "/admin/invite-requests/approve": [M.POST],
+    "/admin/invite-requests/reject": [M.POST],
 }
 
 
 class ApiStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *, code: lambda_.Code | None = None,
-                 web_origins=("http://localhost:5173",), email_via: str = "ses", **kwargs) -> None:
+                 web_origins=("http://localhost:5173",), email_via: str = "ses", site_url: str = "",
+                 **kwargs) -> None:
         """code: the Lambda zip (default: bundling.py; tests pass a stub).
         web_origins: sites allowed to call the API from a browser (CORS): the local dev server now,
         the real site's URL from M7."""
@@ -110,6 +114,7 @@ class ApiStack(Stack):
             "LITFETCH_TABLE": TABLE_NAME,
             "LITFETCH_SSM_PREFIX": SSM_PREFIX,
             "LITFETCH_USER_POOL_ID": self.pool.user_pool_id,
+            "LITFETCH_SITE_URL": site_url,                     # for sign-up links in invite emails
         }, "Literature Fetch: the website's API")
         table.grant_read_write_data(self.api_fn)
         param = f"arn:aws:ssm:{self.region}:{self.account}:parameter"

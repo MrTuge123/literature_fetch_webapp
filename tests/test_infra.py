@@ -228,11 +228,11 @@ def test_web_client_has_no_secret(api_template):
         "ExplicitAuthFlows": Match.array_with(["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"])})
 
 
-def test_every_api_route_exists_and_only_health_is_public(api_template):
+def test_every_api_route_exists_and_only_health_and_invite_requests_are_public(api_template):
     routes = {r["Properties"]["RouteKey"]: r["Properties"].get("AuthorizationType", "NONE")
               for r in api_template.find_resources("AWS::ApiGatewayV2::Route").values()}
     assert set(routes) == {f"{m} {p}" for (m, p) in api_http.ROUTES}       # infra matches api/http.py
-    assert {k for k, auth in routes.items() if auth != "JWT"} == {"GET /health"}
+    assert {k for k, auth in routes.items() if auth != "JWT"} == {"GET /health", "POST /invite-requests"}
 
 
 def test_cors_and_throttling(api_template):

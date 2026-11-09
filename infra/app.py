@@ -60,7 +60,7 @@ origins = [web.url]
 if app.node.try_get_context("localDev") != "off":
     origins.append("http://localhost:5173")
 origins += [o for o in (app.node.try_get_context("webOrigins") or "").split(",") if o]
-ApiStack(app, "LitFetchApi", env=env, web_origins=origins, email_via=email_via,
+ApiStack(app, "LitFetchApi", env=env, web_origins=origins, email_via=email_via, site_url=web.url,
          description="Literature Fetch: sign-in (Cognito) and the website's API")
 
 cdk.Tags.of(app).add("project", "literature-fetch")       # every resource, so costs can be filtered

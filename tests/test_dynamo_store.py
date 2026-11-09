@@ -128,3 +128,21 @@ def test_set_paused_keeps_settings(ds):
     assert ds.list_subscribers() == [] and ds.load_preferences("a_lab") is not None
     assert ds.set_paused("a_lab", False) is True and ds.list_subscribers() == ["a_lab"]
     assert ds.set_paused("nobody") is False
+
+
+def test_invite_requests_one_pending_per_address(ds):
+    assert ds.request_invite("a@umich.edu", "Ann", "Wang lab") is True
+    assert ds.request_invite("a@umich.edu", "Ann", "again") is False          # still pending
+    assert ds.get_invite_request("a@umich.edu")["note"] == "Wang lab"
+    req = ds.decide_invite_request("a@umich.edu", "approved", "tiger@umich.edu", "ABCD1234")
+    assert req["status"] == "approved" and req["code"] == "ABCD1234"
+    assert ds.decide_invite_request("a@umich.edu", "rejected", "tiger@umich.edu") is None   # decided once
+    assert ds.request_invite("a@umich.edu", "Ann", "lost my code") is True    # may ask again later
+
+
+def test_invite_requests_list_pending_first(ds):
+    ds.request_invite("a@umich.edu", "Ann")
+    ds.request_invite("b@umich.edu", "Bo")
+    ds.decide_invite_request("a@umich.edu", "rejected", "tiger@umich.edu")
+    assert [r["email"] for r in ds.list_invite_requests()] == ["b@umich.edu", "a@umich.edu"]
+    assert ds.list_invites() == [] and ds.list_subscribers() == []            # separate from both

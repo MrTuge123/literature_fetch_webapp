@@ -162,3 +162,78 @@ def test_errors_do_not_leak_details(monkeypatch):
     monkeypatch.setattr(http, "_settings_of", lambda user: 1 / 0)
     status, body = call("GET", "/me")
     assert status == 500 and body == {"error": "internal", "message": "something went wrong; it has been logged"}
+
+
+# ---------- invite requests ----------
+
+REQUEST = {"name": "Ann Lee", "email": "Ann@UMich.edu", "note": "PhD student, cardiology"}
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Emails the API sends, as (to, subject, text); SMTP login of the bot in the environment."""
+    out = []
+    monkeypatch.setattr(http, "_send_email", lambda to, subject, text: out.append((to, subject, text)))
+    boto3.client("ssm", region_name="us-east-2").put_parameter(      # the API reads Parameter Store
+        Name="/litfetch/SMTP_USER", Value="literaturebot@gmail.com", Type="SecureString")
+    monkeypatch.setenv("LITFETCH_SITE_URL", "https://site.example/")
+    return out
+
+
+def request(body=REQUEST, ip="1.2.3.4"):
+    event = {"rawPath": "/invite-requests", "body": json.dumps(body),
+             "requestContext": {"http": {"method": "POST", "sourceIp": ip}}}
+    r = http.handler(event, None)
+    return r["statusCode"], json.loads(r["body"])
+
+
+def test_anyone_can_request_an_invite_and_the_bot_is_emailed(sent):
+    assert request() == (200, {"ok": True})
+    assert [(to, subj) for to, subj, _ in sent] == [("literaturebot@gmail.com", "Invite request: Ann Lee <ann@umich.edu>")]
+    assert "PhD student" in sent[0][2] and "https://site.example/admin" in sent[0][2]
+    assert request() == (200, {"ok": True}) and len(sent) == 1            # same answer, no second email
+
+
+def test_invite_request_is_checked(sent):
+    assert request({**REQUEST, "email": "not-an-email"})[0] == 400
+    assert request({**REQUEST, "name": ""})[0] == 400
+    assert request({**REQUEST, "note": "x" * 501})[0] == 400
+    assert request({**REQUEST, "website": "http://spam"}) == (200, {"ok": True})   # bot filled the trap
+    assert sent == [] and DynamoStore().list_invite_requests() == []
+
+
+def test_invite_requests_are_limited_per_ip(sent):
+    for i in range(http.REQUESTS_PER_IP):
+        assert request({**REQUEST, "email": f"p{i}@umich.edu"})[0] == 200
+    assert request({**REQUEST, "email": "late@umich.edu"})[0] == 429
+    assert request({**REQUEST, "email": "late@umich.edu"}, ip="5.6.7.8")[0] == 200
+
+
+def test_admin_approves_a_request_and_the_person_gets_a_link(sent):
+    request()
+    assert call("GET", "/admin/invite-requests")[0] == 403                # admins only
+    reqs = call("GET", "/admin/invite-requests", claims=ADMIN)[1]["requests"]
+    assert [(r["email"], r["status"]) for r in reqs] == [("ann@umich.edu", "pending")]
+    status, body = call("POST", "/admin/invite-requests/approve", {"email": "ann@umich.edu", "days": 7}, claims=ADMIN)
+    assert status == 200 and body["emailed"] is True
+    assert body["link"] == f"https://site.example/login?invite={body['code']}"
+    to, subject, text = sent[-1]
+    assert to == "ann@umich.edu" and body["link"] in text and "valid 7 days" in text
+    invite = next(i for i in DynamoStore().list_invites() if i["code"] == body["code"])
+    assert invite["created_by"] == "tiger@umich.edu" and invite["note"] == "request: Ann Lee"
+    assert call("POST", "/admin/invite-requests/approve", {"email": "ann@umich.edu"}, claims=ADMIN)[0] == 409
+
+
+def test_admin_rejects_a_request(sent):
+    request()
+    assert call("POST", "/admin/invite-requests/reject", {"email": "ann@umich.edu"}, claims=ADMIN) == (200, {"status": "rejected"})
+    assert DynamoStore().get_invite_request("ann@umich.edu")["status"] == "rejected"
+    assert call("POST", "/admin/invite-requests/reject", {"email": "ann@umich.edu"}, claims=ADMIN)[0] == 409
+    assert len(sent) == 1                                                  # only the bot's notice
+
+
+def test_approval_still_returns_the_code_if_the_email_fails(sent, monkeypatch):
+    request()
+    monkeypatch.setattr(http, "_send_email", lambda *a: (_ for _ in ()).throw(RuntimeError("SMTP down")))
+    status, body = call("POST", "/admin/invite-requests/approve", {"email": "ann@umich.edu"}, claims=ADMIN)
+    assert status == 200 and body["emailed"] is False and "SMTP down" in body["email_error"] and body["code"]
