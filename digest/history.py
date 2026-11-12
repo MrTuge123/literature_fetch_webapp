@@ -37,6 +37,7 @@ def record(p, rank, today, posted):
         "first_seen": today,
         "last_seen": today,
         "journal": p["journal"],
+        "year": p.get("year"),                          # publication year (OpenAlex); None = unknown
         "journal_citedness": (p.get("source") or {}).get("citedness"),   # ~ impact factor; None = unknown
         "preprint": p["preprint"],
         "top_author": p.get("top_author"),              # {id, name, h, role}
@@ -129,6 +130,16 @@ def apply_references(records, updates):
             r["openalex_id"] = r.get("openalex_id") or u["openalex_id"]
             if u["references"]:
                 r["references"] = u["references"]
+    return records
+
+
+def apply_years(records, years):
+    """Fill in publication years looked up later (scripts/backfill_years.py): years is
+    {OpenAlex ID or DOI: year}. Never replaces a year already there. Changes records in place."""
+    for r in records:
+        y = years.get(r.get("openalex_id")) or years.get(r.get("doi"))
+        if y and not r.get("year"):
+            r["year"] = y
     return records
 
 

@@ -41,12 +41,14 @@ def _counts(r, cfg):
 
 
 def label(r):
-    """The first author's surname ('Qian'), from the key authors history keeps; else a short title."""
+    """The first author's surname and the publication year ('Qian, 2025'; just 'Qian' while the
+    year is unknown), from the key authors history keeps; else a short title."""
     authors = list(r.get("key_authors") or []) + ([r["top_author"]] if r.get("top_author") else [])
     first = next((a.get("name") for a in authors if "first" in (a.get("role") or "")), None)
     name = connections._surname(first) if first else ""
     if name:
-        return name.title() if name.isupper() and len(name) > 3 else name
+        name = name.title() if name.isupper() and len(name) > 3 else name
+        return f"{name}, {r['year']}" if r.get("year") else name
     t = r["title"]
     return t[:40].rstrip() + ("…" if len(t) > 40 else "")
 
@@ -58,7 +60,7 @@ def build(records, date=None, sub=None):
 
     {"date", "papers": week papers, "with_refs": week papers with reference lists,
      "linked": earlier papers linked to them, "more": linked but not shown (over MAX_EARLIER),
-     "nodes": [{"id", "label", "title", "link", "journal", "date", "sent", "this_week",
+     "nodes": [{"id", "label", "title", "link", "journal", "year", "date", "sent", "this_week",
                 "relevance", "has_refs", "summary"}],
      "edges": [{"source", "target", "shared": shared references, "direct": one cites the other}]}"""
     cfg = connections.settings(sub or {})
@@ -122,7 +124,7 @@ def build(records, date=None, sub=None):
         "linked": len(best),
         "more": len(best) - len(shown),
         "nodes": [{"id": _key(r), "label": label(r), "title": r["title"], "link": r.get("link"),
-                   "journal": r.get("journal"), "date": _when(r), "sent": bool(r.get("posted_at")),
+                   "journal": r.get("journal"), "year": r.get("year"), "date": _when(r), "sent": bool(r.get("posted_at")),
                    "this_week": _key(r) in week_keys, "relevance": r.get("relevance"),
                    "has_refs": bool(r.get("references")), "summary": r.get("summary")}
                   for r in nodes],

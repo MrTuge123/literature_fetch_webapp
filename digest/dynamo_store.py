@@ -125,6 +125,15 @@ class DynamoStore:
         changed = history.apply_references(json.loads(json.dumps(list(stored.values()))), updates)
         self._write(sid, stored, changed, replace=True)
 
+    def set_years(self, sid, years):
+        """Fill in publication years looked up later, {OpenAlex ID or DOI: year}
+        (scripts/backfill_years.py). Rewrites only the items that get a year."""
+        if not years:
+            return
+        stored = self._history(sid)
+        changed = history.apply_years(json.loads(json.dumps(list(stored.values()))), years)
+        self._write(sid, stored, changed, replace=True)
+
     def _write(self, sid, stored, records, replace=False):
         """Make the subscriber's HIST# items equal combine(stored + records) (or combine(records)
         when replace=True), touching only the items that differ."""

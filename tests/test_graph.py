@@ -7,7 +7,7 @@ WEEK = "2026-11-09"
 
 def rec(title, posted=None, seen="2026-10-05", rel=None, refs=None, oa=None, first="Ann Smith", summary=None):
     """A history record (digest/history.py) with only what the graph reads."""
-    return {"title": title, "posted_at": posted, "first_seen": posted or seen, "relevance": rel,
+    return {"title": title, "posted_at": posted, "first_seen": posted or seen, "relevance": rel, "year": 2026,
             "references": list(refs) if refs is not None else None, "openalex_id": oa,
             "ids": [f"title:{title}"], "key_authors": [{"name": first, "role": "first"}] if first else [],
             "top_author": None, "link": f"https://example.org/{title}", "journal": "J", "summary": summary}
@@ -33,6 +33,7 @@ def test_earlier_papers_sharing_two_references_are_linked():
     assert (g["date"], g["papers"], g["with_refs"], g["linked"], g["more"]) == (WEEK, 1, 1, 1, 0)
     week, earlier = g["nodes"]
     assert week["this_week"] and week["sent"] and week["summary"] == "A summary." and week["date"] == WEEK
+    assert (week["label"], week["year"]) == ("Smith, 2026", 2026)
     assert not earlier["this_week"] and earlier["date"] == "2026-11-02"
 
 
@@ -105,6 +106,8 @@ def test_papers_without_references_are_still_shown():
 def test_label_is_the_first_authors_surname():
     def r(authors, top=None, title="A fairly long paper title about spatial transcriptomics"):
         return {"title": title, "key_authors": authors, "top_author": top}
+    assert graph.label({**r([{"name": "Hanyu Qian", "role": "first"}]), "year": 2025}) == "Qian, 2025"
+    assert graph.label({**r([{"name": "Hanyu Qian", "role": "first"}]), "year": None}) == "Qian"
     assert graph.label(r([{"name": "Hyunju Lee", "role": "last"}, {"name": "Jisang Kim", "role": "first"}])) == "Kim"
     assert graph.label(r([{"name": "WANG X", "role": "first+corresponding"}])) == "Wang"
     assert graph.label(r([], top={"name": "Smith, John", "role": "first"})) == "Smith"

@@ -192,7 +192,7 @@ function Details({ node: n, edges, onSelect }: { node: PlacedNode; edges: Placed
     .map((e) => ({ other: e.source.id === n.id ? e.target : e.source, shared: e.shared, direct: e.direct }))
     .sort((a, b) => Number(b.direct) - Number(a.direct) || b.shared - a.shared);
   const meta = [
-    n.journal,
+    [n.journal, n.year].filter(Boolean).join(", "),
     n.sent ? `sent ${formatDay(n.date, "medium")}` : `not sent (found ${formatDay(n.date, "medium")})`,
     n.relevance != null ? `relevance ${n.relevance}/10` : null,
     n.has_refs ? null : "no reference data yet",

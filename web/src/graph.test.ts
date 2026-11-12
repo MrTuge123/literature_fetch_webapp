@@ -4,7 +4,7 @@ import { NEWER_COLOR, OLDER_COLOR, dateColor, layout, parseDay, radius } from ".
 
 function node(id: string, extra: Partial<GraphNode> = {}): GraphNode {
   return {
-    id, label: id, title: `Paper ${id}`, link: null, journal: null, date: "2026-11-02", sent: true,
+    id, label: `${id}, 2026`, title: `Paper ${id}`, link: null, journal: null, year: 2026, date: "2026-11-02", sent: true,
     this_week: false, relevance: 7, has_refs: true, summary: null, ...extra,
   };
 }
