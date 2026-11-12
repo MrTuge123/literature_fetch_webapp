@@ -41,6 +41,7 @@ LOGIN_ROUTES = {
     "/me/preview": [M.POST],
     "/me/test-delivery": [M.POST],
     "/me/digests": [M.GET],
+    "/me/graph": [M.GET],
     "/admin/invites": [M.GET, M.POST],
     "/admin/invite-requests": [M.GET],
     "/admin/invite-requests/approve": [M.POST],

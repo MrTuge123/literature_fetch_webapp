@@ -6,7 +6,7 @@ import boto3
 import pytest
 
 from api import http
-from digest import env, paper
+from digest import env, history, paper
 from digest.dynamo_store import DynamoStore
 
 ALICE = {"sub": "alice-0001", "email": "alice@umich.edu"}
@@ -17,8 +17,10 @@ SETTINGS = {"name": "Alice's digest", "topic": "graph neural networks for spatia
 WEBHOOK = "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXX"
 
 
-def call(method, path, body=None, claims=ALICE, raw=None):
+def call(method, path, body=None, claims=ALICE, raw=None, query=None):
     event = {"rawPath": path, "requestContext": {"http": {"method": method}}}
+    if query:
+        event["queryStringParameters"] = query
     if claims:
         event["requestContext"]["authorizer"] = {"jwt": {"claims": claims}}
     if body is not None or raw is not None:
@@ -139,6 +141,26 @@ def test_digests_lists_what_was_sent_newest_first():
     (day,) = call("GET", "/me/digests")[1]["digests"]
     assert [p["title"] for p in day["papers"]] == [a["title"]] and day["papers"][0]["summary"] == "Short summary."
     assert call("GET", "/me/digests", claims=BOB)[1]["digests"] == []
+
+
+def test_graph_links_a_digest_to_earlier_papers():
+    def p(title, doi, refs, oa=None):
+        x = paper.new("PubMed", title, doi=doi, journal="J", openalex_id=oa)
+        x.update(score=0.5, keyword_hits=[], references=refs, relevance=8)
+        return x
+    old = p("An earlier paper on spatial graph learning methods", "10.1/old", ["W1", "W2"], oa="W50")
+    new = p("This week's paper on spatial graph learning methods", "10.1/new", ["W1", "W2", "W50"])
+    store = DynamoStore()
+    store.merge_history("alice-0001", history.new_records([old], [old], today="2026-11-02"))
+    store.merge_history("alice-0001", history.new_records([new], [new], today="2026-11-09"))
+    status, g = call("GET", "/me/graph")
+    assert status == 200 and g["date"] == "2026-11-09"
+    assert [n["title"] for n in g["nodes"]] == [new["title"], old["title"]]
+    assert [(e["shared"], e["direct"]) for e in g["edges"]] == [(2, True)]
+    assert call("GET", "/me/graph", query={"date": "2026-11-02"})[1]["nodes"][0]["title"] == old["title"]
+    assert call("GET", "/me/graph", query={"date": "2026-11-01"})[1]["error"] == "no_digest"
+    assert call("GET", "/me/graph", query={"date": "last week"})[1]["error"] == "invalid"
+    assert call("GET", "/me/graph", claims=BOB)[0] == 404              # only ever their own history
 
 
 def test_delete_account_removes_everything():

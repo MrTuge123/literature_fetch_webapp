@@ -12,6 +12,7 @@ ever read or change that user's own items.
     POST   /me/preview             search with their settings now: counts + 5 titles, no LLM ranking
     POST   /me/test-delivery       a short test message to their chats (3 a day)
     GET    /me/digests             papers they were sent, newest first
+    GET    /me/graph?date=Y-M-D    how that digest's papers link to earlier ones (default: the latest)
     DELETE /me                     delete their account and everything stored for it
     GET    /admin/invites          list invite codes                       admins only
     POST   /admin/invites          make invite codes {"count", "days", "note"}
@@ -38,6 +39,7 @@ SSM_PREFIX = os.getenv("LITFETCH_SSM_PREFIX", "/litfetch/")
 WEBHOOK_RE = re.compile(r"^https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{10,200}$")
 TEST_MESSAGES_PER_DAY = 3
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[A-Za-z]{2,}$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 REQUESTS_PER_DAY = 20            # invite requests from everyone together, per day
 REQUESTS_PER_IP = 3              # ... and from one IP address, per day
 MAX_BODY = 64 * 1024
@@ -243,6 +245,22 @@ def digests(user, event):
                  "summary": r.get("summary"), "relevance": r.get("relevance"), "rank": r.get("rank")})
     return {"digests": [{"date": d, "papers": sorted(ps, key=lambda p: p["rank"] or 0)}
                         for d, ps in sorted(days.items(), reverse=True)[:20]]}
+
+
+@route("GET", "/me/graph")
+def paper_graph(user, event):
+    """How the papers sent on ?date= link to earlier ones through shared references (digest/graph.py).
+    Reads history only: no OpenAlex or LLM calls."""
+    from digest import graph
+    store, _, _ = _deps()
+    date = str((event.get("queryStringParameters") or {}).get("date") or "").strip() or None
+    if date and not DATE_RE.match(date):
+        raise HttpError(400, "invalid", "date must look like 2026-11-09")
+    prefs = store.load_preferences(user.id)
+    out = graph.build(store.load_history(user.id), date, prefs.to_sub() if prefs else None)
+    if out is None:
+        raise HttpError(404, "no_digest", f"no digest was sent on {date}" if date else "no digest has been sent yet")
+    return out
 
 
 @route("DELETE", "/me")
