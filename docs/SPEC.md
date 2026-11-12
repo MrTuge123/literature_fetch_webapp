@@ -74,6 +74,7 @@ One Lambda (`api`) behind an HTTP API serves every route. It uses AWS Lambda Pow
 | POST | `/me/preview` | Run the query only, return match count + 5 titles | No LLM calls; 25 s limit |
 | POST | `/me/test-delivery` | Send a short test message | Rate limit: 3 a day |
 | GET | `/me/digests` | List past digests, newest first | Paginated |
+| GET | `/me/graph?date=` | How one digest's papers link to earlier ones (shared references) | Reads history only; no OpenAlex or LLM calls |
 | DELETE | `/me` | Delete account and all items |  |
 | POST | `/admin/invites` | Create invite codes | Cognito `admins` group only |
 

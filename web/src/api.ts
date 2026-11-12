@@ -81,6 +81,32 @@ export type DigestPaper = {
 };
 export type Digest = { date: string; papers: DigestPaper[] };
 
+// GET /me/graph?date= (digest/graph.py): one digest's papers and the earlier papers they link to
+export type GraphNode = {
+  id: string;
+  label: string; // "Qian, 2025": first author's surname and publication year (or a short title)
+  title: string;
+  link: string | null;
+  journal: string | null;
+  year: number | null; // publication year
+  date: string; // when it was sent, or first seen if never sent
+  sent: boolean;
+  this_week: boolean;
+  relevance: number | null;
+  has_refs: boolean;
+  summary: string | null;
+};
+export type GraphEdge = { source: string; target: string; shared: number; direct: boolean };
+export type PaperGraph = {
+  date: string;
+  papers: number;
+  with_refs: number;
+  linked: number;
+  more: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
 export type Invite = {
   code: string;
   note: string | null;

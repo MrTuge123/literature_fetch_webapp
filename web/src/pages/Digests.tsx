@@ -1,14 +1,21 @@
 import { useEffect, useState } from "react";
 import { api, errorText, type Digest } from "../api";
+import PaperGraph from "../components/PaperGraph";
 import { Alert, Loading } from "../components/ui";
+import { formatDay } from "../graph";
 
 export default function Digests() {
   const [digests, setDigests] = useState<Digest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Digests opened so far: their graphs are loaded on first open and kept
+  const [opened, setOpened] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api<{ digests: Digest[] }>("GET", "/me/digests")
-      .then((r) => setDigests(r.digests))
+      .then((r) => {
+        setDigests(r.digests);
+        if (r.digests.length) setOpened(new Set([r.digests[0].date]));
+      })
       .catch((e) => setError(errorText(e)));
   }, []);
 
@@ -20,9 +27,16 @@ export default function Digests() {
       <h1 className="text-2xl font-semibold">Past digests</h1>
       {!digests.length && <p className="text-sm text-slate-500">No digests yet: your first one arrives on the next weekly run.</p>}
       {digests.map((d, i) => (
-        <details key={d.date} className="card" open={i === 0}>
+        <details
+          key={d.date}
+          className="card"
+          open={i === 0}
+          onToggle={(e) => {
+            if (e.currentTarget.open) setOpened((prev) => (prev.has(d.date) ? prev : new Set(prev).add(d.date)));
+          }}
+        >
           <summary className="cursor-pointer font-medium">
-            {new Date(d.date).toLocaleDateString(undefined, { dateStyle: "long" })}
+            {formatDay(d.date)}
             <span className="ml-2 text-sm font-normal text-slate-500">{d.papers.length} papers</span>
           </summary>
           <ol className="mt-4 space-y-4">
@@ -38,6 +52,11 @@ export default function Digests() {
               </li>
             ))}
           </ol>
+          {opened.has(d.date) && (
+            <div className="mt-6 border-t border-slate-200 pt-4">
+              <PaperGraph date={d.date} />
+            </div>
+          )}
         </details>
       ))}
     </div>
